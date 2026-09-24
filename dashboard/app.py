@@ -63,14 +63,28 @@ class ThreatEngine:
                 x1,y1,x2,y2 = map(int, box.xyxy[0].tolist())
                 prox = self._proximity_ratio(x1,y1,x2,y2, W, H)
                 obj = dict(cls=cls_name, conf=round(conf,2), prox=round(prox,3), bbox=[x1,y1,x2,y2])
+                
+                track_id = int(box.id[0]) if box.id is not None else None
+                obj["track_id"] = track_id
 
-                if cls_name == self.PERSON_CLASS:      persons.append(obj)
+                if cls_name == self.PERSON_CLASS:
+                    # Fall Detection Heuristic (if width > height * 1.2)
+                    w, h = x2 - x1, y2 - y1
+                    if w > h * 1.2:
+                        obj["fallen"] = True
+                    persons.append(obj)
                 elif cls_name in self.WEAPON_CLASSES:  weapons.append(obj)
                 elif cls_name in self.HAZARD_CLASSES:  hazards.append(obj)
                 elif cls_name in self.VEHICLE_CLASSES: vehicles.append(obj)
                 else:                                  other.append(obj)
 
         level, reasons, tags = "SAFE", [], []
+        
+        fallen_count = sum(1 for p in persons if p.get("fallen"))
+        if fallen_count > 0:
+            level = "CRITICAL"
+            reasons.append(f"FALL DETECTED: {fallen_count} person(s) down")
+            tags.append("fall")
 
         if weapons:
             level = "CRITICAL"
@@ -135,8 +149,15 @@ def _draw(frame, results, threat, cam_id, fps):
             
             x1,y1,x2,y2 = map(int, box.xyxy[0].tolist())
             color = CLS_COLORS.get(cls_name, CLS_COLORS["default"])
+            
+            # Draw tracking ID if available
+            track_label = ""
+            if box.id is not None:
+                track_id = int(box.id[0])
+                track_label = f" #{track_id}"
+                
             cv2.rectangle(frame, (x1,y1), (x2,y2), color, 2)
-            lbl = f"{cls_name} {conf:.0%}"
+            lbl = f"{cls_name}{track_label} {conf:.0%}"
             (tw,th),_ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
             cv2.rectangle(frame, (x1, y1-th-6), (x1+tw+4, y1), color, -1)
             cv2.putText(frame, lbl, (x1+2, y1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0,0,0), 1)
@@ -198,7 +219,9 @@ class CameraStream:
 
             results = None
             if YOLO_AVAILABLE:
-                try: results = _yolo_model(frame, verbose=False)
+                try: 
+                    # Enable ByteTrack for Object Tracking across frames
+                    results = _yolo_model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False)
                 except: pass
 
             threat = _threat_engine.analyse(results or [], frame.shape)
