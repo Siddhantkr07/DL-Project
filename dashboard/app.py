@@ -17,10 +17,10 @@ YOLO_AVAILABLE = False
 _yolo_model = None
 try:
     from ultralytics import YOLO
-    # GPU ACTIVATED! Upgraded to YOLOv8m (Medium) for maximum accuracy on RTX 4050
-    _yolo_model = YOLO("yolov8m.pt")
+    # TENSORRT ACTIVATED! Maximum performance on RTX 4050
+    _yolo_model = YOLO("yolov8m.engine", task="detect")
     YOLO_AVAILABLE = True
-    log.info("YOLOv8m loaded on GPU ✅")
+    log.info("YOLOv8m TensorRT Engine loaded ✅")
 except Exception as e:
     log.warning(f"YOLOv8 not available: {e}")
 
