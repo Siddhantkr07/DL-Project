@@ -17,10 +17,10 @@ YOLO_AVAILABLE = False
 _yolo_model = None
 try:
     from ultralytics import YOLO
-    # Switched back to yolov8n.pt (Nano) to fix CPU lag while keeping tracking features
-    _yolo_model = YOLO("yolov8n.pt")
+    # GPU ACTIVATED! Upgraded back to YOLOv8s (Small) for high accuracy!
+    _yolo_model = YOLO("yolov8s.pt")
     YOLO_AVAILABLE = True
-    log.info("YOLOv8n loaded ✅")
+    log.info("YOLOv8s loaded on GPU ✅")
 except Exception as e:
     log.warning(f"YOLOv8 not available: {e}")
 
@@ -203,8 +203,8 @@ class CameraStream:
             with self.lock: self.latest_threat["reasons"] = ["Camera Offline"]
             return
         
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         prev = time.time()
 
         while self.running:
@@ -264,10 +264,10 @@ def start_camera(cam_id, source, location):
 start_camera("CAM-01", 0, "Laptop Webcam")
 
 def get_blank_frame(cam_id, message="Connecting..."):
-    blank = np.zeros((480, 640, 3), dtype=np.uint8)
+    blank = np.zeros((720, 1280, 3), dtype=np.uint8)
     blank[:] = (20, 24, 34) # dark background
-    cv2.putText(blank, message, (150, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 255), 2)
-    cv2.putText(blank, cam_id, (250, 280), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
+    cv2.putText(blank, message, (450, 360), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (100, 100, 255), 2)
+    cv2.putText(blank, cam_id, (450, 410), cv2.FONT_HERSHEY_SIMPLEX, 1, (200, 200, 200), 2)
     _, buf = cv2.imencode('.jpg', blank)
     return buf.tobytes()
 
