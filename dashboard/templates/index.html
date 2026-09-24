@@ -1,144 +1,704 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sentinel AI - Security Operations Center</title>
-    
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Custom CSS -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Sentinel AI — SOC Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"/>
 </head>
 <body>
-    <!-- Top Navbar -->
-    <header class="navbar">
-        <div class="logo">
-            <i class="fa-solid fa-shield-halved"></i>
-            <span>SENTINEL AI</span>
+
+<div class="shell">
+
+  <!-- ═══ SIDEBAR ═══ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-brand">
+      <div class="sb-logo"><i class="fa-solid fa-shield-halved"></i></div>
+    </div>
+    <nav class="sb-nav">
+      <button class="sb-item sb-item--active" data-page="overview" data-tip="Overview" aria-label="Overview">
+        <i class="fa-solid fa-table-columns"></i>
+      </button>
+      <button class="sb-item" data-page="cameras" data-tip="Cameras" aria-label="Cameras">
+        <i class="fa-solid fa-video"></i>
+        <span class="sb-pip sb-pip--brand">1</span>
+      </button>
+      <button class="sb-item" data-page="alerts" data-tip="Alerts" aria-label="Alerts">
+        <i class="fa-solid fa-bell"></i>
+        <span class="sb-pip sb-pip--danger" id="sb-alert-pip" style="display:none">0</span>
+      </button>
+      <button class="sb-item" data-page="analytics" data-tip="Analytics" aria-label="Analytics">
+        <i class="fa-solid fa-chart-line"></i>
+      </button>
+      <button class="sb-item" data-page="settings" data-tip="Settings" aria-label="Settings">
+        <i class="fa-solid fa-gear"></i>
+      </button>
+    </nav>
+    <div class="sb-foot">
+      <button class="sb-item" id="theme-toggle" data-tip="Toggle theme" aria-label="Toggle theme">
+        <i class="fa-solid fa-moon" id="theme-icon"></i>
+      </button>
+      <div class="sb-avatar" id="user-avatar-sb" title="Siddhant Kumar">SK</div>
+    </div>
+  </aside>
+
+  <!-- ═══ WORKSPACE ═══ -->
+  <div class="workspace">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="topbar-metrics">
+        <div class="metric"><span class="metric-dot"></span><span class="metric-label">Active</span><span class="metric-val metric-mono" id="m-active">1/4</span></div>
+        <div class="metric-sep"></div>
+        <div class="metric"><span class="metric-label">Persons</span><span class="metric-val metric-mono" id="m-persons">0</span></div>
+        <div class="metric-sep"></div>
+        <div class="metric"><span class="metric-label">Threat</span><span class="metric-val metric-mono metric-threat" id="m-threat">SAFE</span></div>
+        <div class="metric-sep"></div>
+        <div class="metric"><span class="metric-label">FPS</span><span class="metric-val metric-mono" id="m-fps">—</span></div>
+        <div class="metric-sep"></div>
+        <div class="metric"><span class="metric-label">Uptime</span><span class="metric-val metric-mono" id="m-uptime">0:00</span></div>
+        <div class="metric-sep"></div>
+        <div class="metric"><span class="metric-label">Incidents</span><span class="metric-val metric-mono" id="m-incidents">0</span></div>
+      </div>
+      <div class="topbar-right">
+        <div class="search-wrap" id="global-search-wrap">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="search" id="global-search" placeholder="Search cameras, alerts…"/>
+          <kbd>⌘K</kbd>
         </div>
-        <div class="nav-center">
-            <div class="system-status">
-                <span class="status-indicator"></span>
-                <span>SYSTEM ONLINE</span>
-            </div>
+        <button class="icon-btn" id="notif-btn" aria-label="Notifications">
+          <i class="fa-solid fa-bell"></i>
+          <span class="notif-pip" id="notif-pip"></span>
+        </button>
+        <div class="user-chip" id="user-chip-btn">
+          <div class="user-chip-av">SK</div>
+          <div class="user-chip-info">
+            <span class="user-name">Siddhant Kumar</span>
+            <span class="user-role">SOC Analyst</span>
+          </div>
+          <i class="fa-solid fa-chevron-down user-caret"></i>
         </div>
-        <div class="nav-right">
-            <div id="clock" class="clock">00:00:00</div>
-            <div class="user-profile">
-                <i class="fa-solid fa-user-shield"></i> Admin
-            </div>
-        </div>
+      </div>
     </header>
 
-    <div class="dashboard-container">
-        <!-- Left Sidebar: Camera List -->
-        <aside class="sidebar">
-            <h2 class="section-title"><i class="fa-solid fa-video"></i> Camera Feeds</h2>
-            <div class="camera-list" id="camera-list">
-                <!-- Camera cards will be inserted here by JS -->
-            </div>
-        </aside>
-
-        <!-- Main Area: Video Grid -->
-        <main class="main-content">
-            <div class="video-grid">
-                <div class="video-container" id="feed-cam-01">
-                    <div class="video-overlay">
-                        <span class="cam-id">CAM-01</span>
-                        <span class="cam-loc">Main Entrance</span>
-                    </div>
-                    <div class="placeholder-feed">
-                        <i class="fa-solid fa-satellite-dish fa-spin"></i>
-                        <p>Awaiting Feed</p>
-                    </div>
-                </div>
-                <div class="video-container" id="feed-cam-02">
-                    <div class="video-overlay">
-                        <span class="cam-id">CAM-02</span>
-                        <span class="cam-loc">Lobby</span>
-                    </div>
-                    <div class="placeholder-feed">
-                        <i class="fa-solid fa-satellite-dish fa-spin"></i>
-                        <p>Awaiting Feed</p>
-                    </div>
-                </div>
-                <div class="video-container" id="feed-cam-03">
-                    <div class="video-overlay">
-                        <span class="cam-id">CAM-03</span>
-                        <span class="cam-loc">Perimeter North</span>
-                    </div>
-                    <div class="placeholder-feed">
-                        <i class="fa-solid fa-satellite-dish fa-spin"></i>
-                        <p>Awaiting Feed</p>
-                    </div>
-                </div>
-                <div class="video-container" id="feed-cam-04">
-                    <div class="video-overlay">
-                        <span class="cam-id">CAM-04</span>
-                        <span class="cam-loc">Server Room</span>
-                    </div>
-                    <div class="placeholder-feed">
-                        <i class="fa-solid fa-satellite-dish fa-spin"></i>
-                        <p>Awaiting Feed</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="chart-container">
-                <h3 class="section-title"><i class="fa-solid fa-chart-line"></i> Incident Timeline</h3>
-                <canvas id="incidentChart"></canvas>
-            </div>
-        </main>
-
-        <!-- Right Panel: Live Alert Feed -->
-        <aside class="alert-panel">
-            <h2 class="section-title"><i class="fa-solid fa-bell"></i> Live Alerts</h2>
-            <div class="alert-feed" id="alert-feed">
-                <!-- Alerts will be inserted here by JS -->
-            </div>
-        </aside>
+    <!-- PAGE HEADER (dynamic) -->
+    <div class="page-head">
+      <div>
+        <nav class="breadcrumb" id="breadcrumb">
+          <span>Dashboard</span><i class="fa-solid fa-chevron-right"></i><span id="bc-current">Live Monitoring</span>
+        </nav>
+        <h1 class="page-title" id="page-title">Security Operations Center</h1>
+        <p class="page-sub" id="page-dt">Loading…</p>
+      </div>
+      <div class="page-actions" id="page-actions">
+        <!-- filled by router per page -->
+      </div>
     </div>
 
-    <!-- Bottom Bar: System Stats -->
-    <footer class="bottom-bar">
-        <div class="stat-item">
-            <span class="stat-label">Active Cameras</span>
-            <span class="stat-value" id="stat-active-cams">4</span>
-        </div>
-        <div class="stat-item">
-            <span class="stat-label">Total Incidents</span>
-            <span class="stat-value" id="stat-incidents">0</span>
-        </div>
-        <div class="stat-item">
-            <span class="stat-label">Avg System FPS</span>
-            <span class="stat-value" id="stat-avg-fps">0.0</span>
-        </div>
-        <div class="stat-item">
-            <span class="stat-label">AI Compute Load</span>
-            <span class="stat-value">64%</span>
-        </div>
-    </footer>
-
-    <!-- Critical Alert Popup Overlay -->
-    <div class="overlay" id="critical-overlay">
-        <div class="critical-popup">
-            <div class="popup-header">
-                <i class="fa-solid fa-triangle-exclamation fa-beat-fade"></i>
-                <h2>CRITICAL ALERT</h2>
-            </div>
-            <div class="popup-body" id="popup-body">
-                <!-- Details here -->
-            </div>
-            <button class="btn-acknowledge" onclick="document.getElementById('critical-overlay').style.display='none'">ACKNOWLEDGE</button>
-        </div>
+    <!-- TAB STRIP (dynamic) -->
+    <div class="tab-strip" id="tab-strip">
+      <div class="tabs" id="tab-list"></div>
+      <div class="tab-strip-r" id="tab-strip-r"></div>
     </div>
 
-    <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.1/socket.io.js"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+    <!-- ═══ PAGES ═══ -->
+    <div class="view">
+
+      <!-- ── PAGE: OVERVIEW ── -->
+      <div class="page page--active" id="page-overview">
+        <div class="view-main">
+          <!-- KPI -->
+          <div class="kpi-row">
+            <div class="kpi-card" onclick="navigate('cameras')">
+              <div class="kpi-icon kpi-brand"><i class="fa-solid fa-video"></i></div>
+              <div class="kpi-body"><div class="kpi-num" id="kpi-cameras">1</div><div class="kpi-label">Active Cameras</div></div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon kpi-safe"><i class="fa-solid fa-users"></i></div>
+              <div class="kpi-body"><div class="kpi-num" id="kpi-persons">0</div><div class="kpi-label">Persons Detected</div></div>
+            </div>
+            <div class="kpi-card" onclick="navigate('alerts')">
+              <div class="kpi-icon kpi-warn"><i class="fa-solid fa-triangle-exclamation"></i></div>
+              <div class="kpi-body"><div class="kpi-num" id="kpi-incidents">0</div><div class="kpi-label">Incidents Today</div></div>
+            </div>
+            <div class="kpi-card" onclick="navigate('analytics')">
+              <div class="kpi-icon kpi-safe" id="kpi-threat-icon"><i class="fa-solid fa-shield-virus"></i></div>
+              <div class="kpi-body"><div class="kpi-num kpi-num-sm" id="kpi-threat">SAFE</div><div class="kpi-label">Threat Level</div></div>
+              <div class="kpi-fps-badge"><span id="kpi-fps">—</span> FPS</div>
+            </div>
+          </div>
+
+          <!-- PRIMARY ROW -->
+          <div class="primary-row">
+            <!-- LIVE FEED -->
+            <div class="feed-card">
+              <div class="feed-hdr">
+                <div class="feed-hdr-l">
+                  <span class="live-chip"><span class="live-dot"></span>LIVE</span>
+                  <span class="feed-cam-id">CAM-01</span>
+                  <span class="feed-loc"><i class="fa-solid fa-location-dot"></i>Laptop Webcam</span>
+                </div>
+                <div class="feed-hdr-r">
+                  <span class="data-chip fps-chip" id="feed-fps">— FPS</span>
+                  <span class="data-chip obj-chip" id="feed-obj">0 Objects</span>
+                  <button class="icon-btn icon-sm" id="fullscreen-btn" aria-label="Fullscreen" title="Fullscreen"><i class="fa-solid fa-expand"></i></button>
+                  <button class="icon-btn icon-sm" onclick="captureSnapshot()" aria-label="Snapshot" title="Take Snapshot"><i class="fa-solid fa-camera"></i></button>
+                </div>
+              </div>
+              <div class="feed-body" id="feed-body">
+                <img id="webcam-feed" src="/video_feed/CAM-01" alt="Live CAM-01"
+                  onerror="this.style.display='none';document.getElementById('feed-err').style.display='flex'"/>
+                <div id="feed-err" class="feed-empty" style="display:none">
+                  <i class="fa-solid fa-camera-slash"></i>
+                  <p>Camera unavailable</p><span>Check webcam connection</span>
+                </div>
+                <div class="hud-tl"></div><div class="hud-tr"></div>
+                <div class="hud-bl"></div><div class="hud-br"></div>
+                <div class="feed-strip" id="feed-strip">
+                  <div class="strip-l">
+                    <span class="strip-tag">THREAT</span>
+                    <span class="strip-level" id="strip-level">SAFE</span>
+                    <span class="strip-sep">·</span>
+                    <span class="strip-reason" id="strip-reason">Area clear</span>
+                  </div>
+                  <div class="strip-r">
+                    <span class="s-pill s-pill-p" id="sp-persons"><i class="fa-solid fa-person"></i>0</span>
+                    <span class="s-pill s-pill-v" id="sp-vehicles"><i class="fa-solid fa-car"></i>0</span>
+                    <span class="s-pill s-pill-w" id="sp-weapons" style="display:none"><i class="fa-solid fa-knife"></i>0</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- THREAT PANEL -->
+            <div class="threat-panel">
+              <div class="panel-hdr">
+                <span class="panel-title"><i class="fa-solid fa-brain"></i>Threat Assessment</span>
+                <span class="panel-lvl-tag" id="panel-tag">SAFE</span>
+              </div>
+              <div class="gauge-wrap">
+                <svg class="gauge-svg" viewBox="0 0 220 128">
+                  <path d="M 22 116 A 88 88 0 0 1 198 116" fill="none" stroke="var(--bg-card-3)" stroke-width="13" stroke-linecap="round"/>
+                  <path d="M 22 116 A 88 88 0 0 1 88 28"  fill="none" stroke="var(--safe)"   stroke-width="13" stroke-linecap="round" opacity=".13"/>
+                  <path d="M 88 28 A 88 88 0 0 1 152 28"  fill="none" stroke="var(--warn)"   stroke-width="13" stroke-linecap="round" opacity=".13"/>
+                  <path d="M 152 28 A 88 88 0 0 1 198 116" fill="none" stroke="var(--danger)" stroke-width="13" stroke-linecap="round" opacity=".13"/>
+                  <path id="gauge-arc" d="M 22 116 A 88 88 0 0 1 198 116"
+                        fill="none" stroke="var(--safe)" stroke-width="13" stroke-linecap="round"
+                        stroke-dasharray="276" stroke-dashoffset="276"
+                        style="transition:stroke-dashoffset .85s cubic-bezier(.4,0,.2,1),stroke .3s ease"/>
+                  <text id="gauge-txt" x="110" y="96" text-anchor="middle" fill="var(--safe)"
+                        font-size="19" font-weight="700" font-family="Inter,sans-serif" style="transition:fill .3s ease">SAFE</text>
+                  <text x="110" y="112" text-anchor="middle" fill="var(--tx-3)" font-size="7.5" font-family="Inter,sans-serif" letter-spacing="1.5">THREAT LEVEL</text>
+                  <text x="14"  y="128" text-anchor="middle" fill="var(--tx-3)" font-size="6.5" font-family="Inter">SAFE</text>
+                  <text x="110" y="16"  text-anchor="middle" fill="var(--tx-3)" font-size="6.5" font-family="Inter">WARN</text>
+                  <text x="206" y="128" text-anchor="middle" fill="var(--tx-3)" font-size="6.5" font-family="Inter">CRIT</text>
+                </svg>
+              </div>
+              <div class="reason-list" id="reason-list">
+                <div class="reason-item reason-safe"><i class="fa-solid fa-circle-check"></i><span>Area clear</span></div>
+              </div>
+              <div class="bd-hdr">Detection Breakdown</div>
+              <div class="bd-grid">
+                <div class="bd-cell"><span class="bd-num" id="bd-persons">0</span><span class="bd-lbl"><i class="fa-solid fa-person"></i>Persons</span></div>
+                <div class="bd-cell"><span class="bd-num" id="bd-vehicles">0</span><span class="bd-lbl"><i class="fa-solid fa-car"></i>Vehicles</span></div>
+                <div class="bd-cell bd-warn"><span class="bd-num" id="bd-weapons">0</span><span class="bd-lbl"><i class="fa-solid fa-knife"></i>Weapons</span></div>
+                <div class="bd-cell bd-danger"><span class="bd-num" id="bd-hazards">0</span><span class="bd-lbl"><i class="fa-solid fa-fire"></i>Hazards</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CAM GRID -->
+          <section class="cam-section">
+            <div class="section-row">
+              <h2 class="section-title">Camera Overview</h2>
+              <button class="chip-btn" onclick="navigate('cameras')"><i class="fa-solid fa-arrow-right"></i> Manage All</button>
+            </div>
+            <div class="cam-grid">
+              <div class="cam-cell cam-active" id="cc-CAM-01" tabindex="0" onclick="selectMainCamera('CAM-01')" ondblclick="openCamDetail('CAM-01')">
+                <div class="cc-hdr"><span class="cc-id">CAM-01</span><button class="icon-btn icon-xs" onclick="event.stopPropagation();openCamMenu(this,'CAM-01')"><i class="fa-solid fa-ellipsis"></i></button></div>
+                <div class="cc-thumb"><img src="/video_feed/CAM-01" class="cc-img" alt="CAM-01"/><span class="cc-live"><span class="live-dot"></span>LIVE</span></div>
+                <div class="cc-foot"><span class="s-badge s-badge-safe" id="cc-badge-CAM-01">SAFE</span><span class="cc-loc">Laptop Webcam</span></div>
+              </div>
+              <div class="cam-cell" id="cc-CAM-02" tabindex="0" onclick="selectMainCamera('CAM-02')" ondblclick="openCamDetail('CAM-02')">
+                <div class="cc-hdr"><span class="cc-id">CAM-02</span><button class="icon-btn icon-xs" onclick="event.stopPropagation();openCamMenu(this,'CAM-02')"><i class="fa-solid fa-ellipsis"></i></button></div>
+                <div class="cc-thumb cc-offline" id="thumb-CAM-02"><img src="/video_feed/CAM-02" class="cc-img" alt="CAM-02" style="display:none" onerror="this.style.display='none'"/><i class="fa-solid fa-video-slash"></i><span>No Signal</span></div>
+                <div class="cc-foot"><span class="s-badge s-badge-off" id="cc-badge-CAM-02">OFFLINE</span><span class="cc-loc" id="loc-CAM-02">North Corridor</span></div>
+              </div>
+              <div class="cam-cell" id="cc-CAM-03" tabindex="0" onclick="selectMainCamera('CAM-03')" ondblclick="openCamDetail('CAM-03')">
+                <div class="cc-hdr"><span class="cc-id">CAM-03</span><button class="icon-btn icon-xs" onclick="event.stopPropagation();openCamMenu(this,'CAM-03')"><i class="fa-solid fa-ellipsis"></i></button></div>
+                <div class="cc-thumb cc-offline"><i class="fa-solid fa-video-slash"></i><span>No Signal</span></div>
+                <div class="cc-foot"><span class="s-badge s-badge-off">OFFLINE</span><span class="cc-loc">Server Room</span></div>
+              </div>
+              <div class="cam-cell" id="cc-CAM-04" tabindex="0" onclick="selectMainCamera('CAM-04')" ondblclick="openCamDetail('CAM-04')">
+                <div class="cc-hdr"><span class="cc-id">CAM-04</span><button class="icon-btn icon-xs" onclick="event.stopPropagation();openCamMenu(this,'CAM-04')"><i class="fa-solid fa-ellipsis"></i></button></div>
+                <div class="cc-thumb cc-offline"><i class="fa-solid fa-video-slash"></i><span>No Signal</span></div>
+                <div class="cc-foot"><span class="s-badge s-badge-off">OFFLINE</span><span class="cc-loc">Parking Lot</span></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- CHARTS -->
+          <div class="chart-row">
+            <div class="chart-card">
+              <div class="chart-hdr"><span class="chart-title"><i class="fa-solid fa-chart-line"></i>Threat Timeline</span><span class="chart-meta">Last 30 seconds</span></div>
+              <div class="chart-body"><canvas id="threat-chart"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-hdr"><span class="chart-title"><i class="fa-solid fa-chart-pie"></i>Detection Types</span><span class="chart-meta">Cumulative</span></div>
+              <div class="chart-body"><canvas id="obj-chart"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ALERT ASIDE -->
+        <aside class="view-aside">
+          <div class="aside-hdr">
+            <span class="panel-title"><i class="fa-solid fa-bell"></i>Live Alerts</span>
+            <div class="aside-hdr-r">
+              <span class="alert-ct-badge" id="alert-ct-badge">0</span>
+              <button class="icon-btn icon-sm" onclick="navigate('alerts')" title="View all alerts"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>
+              <button class="icon-btn icon-sm" onclick="clearAlerts()" title="Clear alerts"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+          </div>
+          <div class="alert-feed" id="alert-feed">
+            <div class="empty-state" id="alert-empty">
+              <div class="empty-icon"><i class="fa-solid fa-circle-check"></i></div>
+              <p class="empty-title">All clear</p><p class="empty-sub">No alerts detected</p>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- ── PAGE: CAMERAS ── -->
+      <div class="page" id="page-cameras">
+        <div class="full-page-content">
+          <div class="page-toolbar">
+            <div class="filter-pills" id="cam-filter-pills">
+              <button class="filter-pill pill-active" data-filter="all">All <span>4</span></button>
+              <button class="filter-pill" data-filter="live">Live <span>1</span></button>
+              <button class="filter-pill" data-filter="offline">Offline <span>3</span></button>
+            </div>
+            <button class="btn btn-primary" onclick="openAddCameraModal()"><i class="fa-solid fa-plus"></i> Add Camera</button>
+          </div>
+
+          <div class="cam-page-grid" id="cam-page-grid">
+            <!-- CAM-01 -->
+            <div class="cam-page-card" data-status="live">
+              <div class="cpc-header">
+                <div class="cpc-header-l">
+                  <span class="live-chip"><span class="live-dot"></span>LIVE</span>
+                  <span class="cpc-id">CAM-01</span>
+                </div>
+                <div class="cpc-header-r">
+                  <span class="s-badge s-badge-safe" id="cpc-badge-CAM-01">SAFE</span>
+                  <button class="icon-btn icon-sm" onclick="openCamMenu(this,'CAM-01')" title="Options"><i class="fa-solid fa-ellipsis"></i></button>
+                </div>
+              </div>
+              <div class="cpc-thumb">
+                <img src="/video_feed/CAM-01" alt="CAM-01" class="cpc-img"/>
+                <div class="cpc-overlay">
+                  <button class="btn-overlay" onclick="openCamDetail('CAM-01')"><i class="fa-solid fa-expand"></i> View Full</button>
+                </div>
+              </div>
+              <div class="cpc-meta">
+                <div class="cpc-row"><i class="fa-solid fa-location-dot"></i><span>Laptop Webcam</span></div>
+                <div class="cpc-row"><i class="fa-solid fa-gauge-high"></i><span id="cpc-fps-CAM-01">— FPS</span></div>
+                <div class="cpc-row"><i class="fa-solid fa-crosshairs"></i><span id="cpc-det-CAM-01">0 detections</span></div>
+              </div>
+              <div class="cpc-footer">
+                <button class="btn btn-ghost btn-sm" onclick="openCamDetail('CAM-01')"><i class="fa-solid fa-eye"></i> View</button>
+                <button class="btn btn-ghost btn-sm" onclick="openConfigModal('CAM-01')"><i class="fa-solid fa-sliders"></i> Configure</button>
+              </div>
+            </div>
+            <!-- CAM-02 -->
+            <div class="cam-page-card cam-page-card--offline" data-status="offline" id="pg-card-CAM-02">
+              <div class="cpc-header">
+                <div class="cpc-header-l"><span class="offline-chip" id="cpc-chip-CAM-02">OFFLINE</span><span class="cpc-id">CAM-02</span></div>
+                <div class="cpc-header-r"><span class="s-badge s-badge-off" id="cpc-badge-CAM-02">INACTIVE</span><button class="icon-btn icon-sm" onclick="openCamMenu(this,'CAM-02')"><i class="fa-solid fa-ellipsis"></i></button></div>
+              </div>
+              <div class="cpc-thumb cpc-thumb--offline" id="cpc-thumb-CAM-02">
+                <img src="/video_feed/CAM-02" class="cpc-img" alt="CAM-02" style="display:none" onerror="this.style.display='none'"/>
+                <i class="fa-solid fa-video-slash"></i><p>No Signal</p><span>Camera not connected</span>
+              </div>
+              <div class="cpc-meta">
+                <div class="cpc-row"><i class="fa-solid fa-location-dot"></i><span id="cpc-loc-CAM-02">North Corridor</span></div>
+                <div class="cpc-row"><i class="fa-solid fa-gauge-high"></i><span id="cpc-fps-CAM-02">— FPS</span></div>
+                <div class="cpc-row muted-row"><i class="fa-solid fa-circle-xmark"></i><span id="cpc-det-CAM-02">Stream unavailable</span></div>
+              </div>
+              <div class="cpc-footer">
+                <button class="btn btn-ghost btn-sm" onclick="openConfigModal('CAM-02')"><i class="fa-solid fa-sliders"></i> Configure</button>
+                <button class="btn btn-primary btn-sm" onclick="openAddCameraModal()"><i class="fa-solid fa-plug"></i> Connect</button>
+              </div>
+            </div>
+            <!-- CAM-03 -->
+            <div class="cam-page-card cam-page-card--offline" data-status="offline">
+              <div class="cpc-header">
+                <div class="cpc-header-l"><span class="offline-chip">OFFLINE</span><span class="cpc-id">CAM-03</span></div>
+                <div class="cpc-header-r"><span class="s-badge s-badge-off">INACTIVE</span><button class="icon-btn icon-sm" onclick="openCamMenu(this,'CAM-03')"><i class="fa-solid fa-ellipsis"></i></button></div>
+              </div>
+              <div class="cpc-thumb cpc-thumb--offline"><i class="fa-solid fa-video-slash"></i><p>No Signal</p><span>Camera not connected</span></div>
+              <div class="cpc-meta">
+                <div class="cpc-row"><i class="fa-solid fa-location-dot"></i><span>Server Room</span></div>
+                <div class="cpc-row"><i class="fa-solid fa-gauge-high"></i><span>— FPS</span></div>
+                <div class="cpc-row muted-row"><i class="fa-solid fa-circle-xmark"></i><span>Stream unavailable</span></div>
+              </div>
+              <div class="cpc-footer">
+                <button class="btn btn-ghost btn-sm" onclick="openConfigModal('CAM-03')"><i class="fa-solid fa-sliders"></i> Configure</button>
+                <button class="btn btn-primary btn-sm" onclick="showToast('Connecting to CAM-03…','info')"><i class="fa-solid fa-plug"></i> Connect</button>
+              </div>
+            </div>
+            <!-- CAM-04 -->
+            <div class="cam-page-card cam-page-card--offline" data-status="offline">
+              <div class="cpc-header">
+                <div class="cpc-header-l"><span class="offline-chip">OFFLINE</span><span class="cpc-id">CAM-04</span></div>
+                <div class="cpc-header-r"><span class="s-badge s-badge-off">INACTIVE</span><button class="icon-btn icon-sm" onclick="openCamMenu(this,'CAM-04')"><i class="fa-solid fa-ellipsis"></i></button></div>
+              </div>
+              <div class="cpc-thumb cpc-thumb--offline"><i class="fa-solid fa-video-slash"></i><p>No Signal</p><span>Camera not connected</span></div>
+              <div class="cpc-meta">
+                <div class="cpc-row"><i class="fa-solid fa-location-dot"></i><span>Parking Lot</span></div>
+                <div class="cpc-row"><i class="fa-solid fa-gauge-high"></i><span>— FPS</span></div>
+                <div class="cpc-row muted-row"><i class="fa-solid fa-circle-xmark"></i><span>Stream unavailable</span></div>
+              </div>
+              <div class="cpc-footer">
+                <button class="btn btn-ghost btn-sm" onclick="openConfigModal('CAM-04')"><i class="fa-solid fa-sliders"></i> Configure</button>
+                <button class="btn btn-primary btn-sm" onclick="showToast('Connecting to CAM-04…','info')"><i class="fa-solid fa-plug"></i> Connect</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PAGE: ALERTS ── -->
+      <div class="page" id="page-alerts">
+        <div class="full-page-content">
+          <div class="page-toolbar">
+            <div class="search-wrap" style="width:260px">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="search" id="alert-search" placeholder="Search alerts…" oninput="filterAlertTable()"/>
+            </div>
+            <div class="filter-pills" id="sev-filter-pills">
+              <button class="filter-pill pill-active" data-sev="all">All</button>
+              <button class="filter-pill filter-pill--crit" data-sev="CRITICAL">Critical</button>
+              <button class="filter-pill filter-pill--warn" data-sev="WARNING">Warning</button>
+              <button class="filter-pill filter-pill--info" data-sev="INFO">Info</button>
+            </div>
+            <div style="margin-left:auto;display:flex;gap:8px">
+              <button class="btn btn-ghost" onclick="clearAlerts()"><i class="fa-solid fa-trash-can"></i> Clear All</button>
+              <button class="btn btn-ghost" onclick="exportAlerts()"><i class="fa-solid fa-download"></i> Export CSV</button>
+            </div>
+          </div>
+          <div class="alerts-table-wrap">
+            <table class="alerts-table" id="alerts-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Severity</th>
+                  <th>Type</th>
+                  <th>Camera</th>
+                  <th>Description</th>
+                  <th>Persons</th>
+                </tr>
+              </thead>
+              <tbody id="alerts-tbody">
+                <tr class="table-empty-row" id="table-empty">
+                  <td colspan="6">
+                    <div class="empty-state" style="padding:40px">
+                      <div class="empty-icon"><i class="fa-solid fa-circle-check"></i></div>
+                      <p class="empty-title">No alerts yet</p>
+                      <p class="empty-sub">Alerts will appear here in real-time</p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PAGE: ANALYTICS ── -->
+      <div class="page" id="page-analytics">
+        <div class="full-page-content">
+          <div class="analytics-kpi">
+            <div class="kpi-card"><div class="kpi-icon kpi-brand"><i class="fa-solid fa-crosshairs"></i></div><div class="kpi-body"><div class="kpi-num" id="an-total-det">0</div><div class="kpi-label">Total Detections</div></div></div>
+            <div class="kpi-card"><div class="kpi-icon kpi-safe"><i class="fa-solid fa-gauge-high"></i></div><div class="kpi-body"><div class="kpi-num metric-mono" id="an-avg-fps">—</div><div class="kpi-label">Avg FPS</div></div></div>
+            <div class="kpi-card"><div class="kpi-icon kpi-warn"><i class="fa-solid fa-shield-virus"></i></div><div class="kpi-body"><div class="kpi-num kpi-num-sm" id="an-max-threat">SAFE</div><div class="kpi-label">Peak Threat</div></div></div>
+            <div class="kpi-card"><div class="kpi-icon kpi-danger"><i class="fa-solid fa-bell"></i></div><div class="kpi-body"><div class="kpi-num" id="an-incidents">0</div><div class="kpi-label">Total Incidents</div></div></div>
+          </div>
+          <div class="analytics-charts-grid">
+            <div class="chart-card chart-card--lg">
+              <div class="chart-hdr"><span class="chart-title"><i class="fa-solid fa-chart-line"></i>Threat Score Timeline</span><span class="chart-meta">Live · Last 30s</span></div>
+              <div class="chart-body chart-body--lg"><canvas id="an-threat-chart"></canvas></div>
+            </div>
+            <div class="chart-card chart-card--lg">
+              <div class="chart-hdr"><span class="chart-title"><i class="fa-solid fa-chart-bar"></i>Detection Breakdown</span><span class="chart-meta">Cumulative counts</span></div>
+              <div class="chart-body chart-body--lg"><canvas id="an-bar-chart"></canvas></div>
+            </div>
+            <div class="chart-card chart-card--lg">
+              <div class="chart-hdr"><span class="chart-title"><i class="fa-solid fa-chart-pie"></i>Threat Distribution</span><span class="chart-meta">% by level</span></div>
+              <div class="chart-body chart-body--lg"><canvas id="an-dist-chart"></canvas></div>
+            </div>
+            <div class="chart-card chart-card--lg">
+              <div class="chart-hdr"><span class="chart-title"><i class="fa-solid fa-chart-area"></i>FPS Over Time</span><span class="chart-meta">Processing speed</span></div>
+              <div class="chart-body chart-body--lg"><canvas id="an-fps-chart"></canvas></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PAGE: SETTINGS ── -->
+      <div class="page" id="page-settings">
+        <div class="full-page-content">
+          <div class="settings-grid">
+            <!-- System Info -->
+            <div class="settings-card">
+              <div class="settings-card-title"><i class="fa-solid fa-microchip"></i> System Information</div>
+              <div class="settings-rows">
+                <div class="settings-row"><span class="sr-label">AI Model</span><span class="sr-val sr-mono">YOLOv8n</span></div>
+                <div class="settings-row"><span class="sr-label">Framework</span><span class="sr-val">Ultralytics 8.4</span></div>
+                <div class="settings-row"><span class="sr-label">Compute</span><span class="sr-val">CPU</span></div>
+                <div class="settings-row"><span class="sr-label">Backend</span><span class="sr-val">Flask + SocketIO</span></div>
+                <div class="settings-row"><span class="sr-label">Status</span><span class="sr-val"><span class="status-dot status-dot--on"></span>Running</span></div>
+              </div>
+            </div>
+            <!-- Detection Settings -->
+            <div class="settings-card">
+              <div class="settings-card-title"><i class="fa-solid fa-crosshairs"></i> Detection Settings</div>
+              <div class="settings-rows">
+                <div class="settings-row"><span class="sr-label">Confidence Threshold</span><span class="sr-val sr-mono">40%</span></div>
+                <div class="settings-row"><span class="sr-label">Min Detection Size</span><span class="sr-val sr-mono">20px</span></div>
+                <div class="settings-row settings-row--slider">
+                  <label class="sr-label">Detection Sensitivity</label>
+                  <input type="range" class="settings-slider" id="conf-slider" min="10" max="90" value="40" oninput="updateConfidence(this.value)"/>
+                  <span class="sr-val sr-mono" id="conf-label">40%</span>
+                </div>
+              </div>
+              <div class="settings-card-title" style="margin-top:12px"><i class="fa-solid fa-tags"></i> Active Classes</div>
+              <div class="class-tags">
+                <span class="class-tag class-tag--active">Person</span>
+                <span class="class-tag class-tag--active">Car</span>
+                <span class="class-tag class-tag--active">Truck</span>
+                <span class="class-tag class-tag--active">Knife</span>
+                <span class="class-tag class-tag--active">Fire</span>
+                <span class="class-tag class-tag--active">Smoke</span>
+                <span class="class-tag">Dog</span>
+                <span class="class-tag">Bicycle</span>
+              </div>
+            </div>
+            <!-- Notifications -->
+            <div class="settings-card">
+              <div class="settings-card-title"><i class="fa-solid fa-bell"></i> Notifications</div>
+              <div class="settings-rows">
+                <div class="settings-row settings-row--toggle">
+                  <div><div class="sr-label">Critical Alerts Modal</div><div class="sr-sub">Show popup for CRITICAL events</div></div>
+                  <button class="toggle-btn toggle-on" id="notif-modal-toggle" onclick="toggleSetting(this,'notif-modal')"></button>
+                </div>
+                <div class="settings-row settings-row--toggle">
+                  <div><div class="sr-label">Sound Alerts</div><div class="sr-sub">Play sound on CRITICAL</div></div>
+                  <button class="toggle-btn" id="notif-sound-toggle" onclick="toggleSetting(this,'notif-sound')"></button>
+                </div>
+                <div class="settings-row settings-row--toggle">
+                  <div><div class="sr-label">Auto-clear Alerts</div><div class="sr-sub">Clear INFO alerts after 60s</div></div>
+                  <button class="toggle-btn" id="notif-autoclear-toggle" onclick="toggleSetting(this,'notif-autoclear')"></button>
+                </div>
+                <div class="settings-row settings-row--toggle">
+                  <div><div class="sr-label">Threat Overlay on Feed</div><div class="sr-sub">Show threat strip on live feed</div></div>
+                  <button class="toggle-btn toggle-on" id="notif-overlay-toggle" onclick="toggleSetting(this,'notif-overlay')"></button>
+                </div>
+              </div>
+            </div>
+            <!-- Appearance -->
+            <div class="settings-card">
+              <div class="settings-card-title"><i class="fa-solid fa-palette"></i> Appearance</div>
+              <div class="settings-rows">
+                <div class="settings-row settings-row--toggle">
+                  <div><div class="sr-label">Dark Mode</div><div class="sr-sub">Use dark color scheme</div></div>
+                  <button class="toggle-btn" id="settings-theme-toggle" onclick="toggleThemeFromSettings()"></button>
+                </div>
+              </div>
+              <div class="settings-card-title" style="margin-top:12px"><i class="fa-solid fa-grip"></i> Accent Color</div>
+              <div class="accent-swatches">
+                <button class="swatch swatch--active" style="background:#6366f1" onclick="setAccent('#6366f1',this)" title="Indigo"></button>
+                <button class="swatch" style="background:#8b5cf6" onclick="setAccent('#8b5cf6',this)" title="Violet"></button>
+                <button class="swatch" style="background:#06b6d4" onclick="setAccent('#06b6d4',this)" title="Cyan"></button>
+                <button class="swatch" style="background:#10b981" onclick="setAccent('#10b981',this)" title="Emerald"></button>
+                <button class="swatch" style="background:#f59e0b" onclick="setAccent('#f59e0b',this)" title="Amber"></button>
+              </div>
+            </div>
+            <!-- About -->
+            <div class="settings-card">
+              <div class="settings-card-title"><i class="fa-solid fa-circle-info"></i> About</div>
+              <div class="settings-rows">
+                <div class="settings-row"><span class="sr-label">Project</span><span class="sr-val">Sentinel AI</span></div>
+                <div class="settings-row"><span class="sr-label">Version</span><span class="sr-val sr-mono">4.0.0</span></div>
+                <div class="settings-row"><span class="sr-label">University</span><span class="sr-val">VIT-AP University</span></div>
+                <div class="settings-row"><span class="sr-label">Course</span><span class="sr-val">Deep Learning Project</span></div>
+                <div class="settings-row"><span class="sr-label">GitHub</span><a class="sr-link" href="https://github.com/Siddhantkr07/DL-Project" target="_blank"><i class="fa-brands fa-github"></i> Siddhantkr07/DL-Project</a></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /view -->
+  </div><!-- /workspace -->
+</div><!-- /shell -->
+
+<!-- STATUS BAR -->
+<footer class="statusbar">
+  <div class="sb-l">
+    <span><i class="fa-solid fa-microchip"></i>YOLOv8n</span>
+    <span class="sb-sep"></span>
+    <span><i class="fa-solid fa-cpu"></i>CPU</span>
+    <span class="sb-sep"></span>
+    <span id="sb-fps"><i class="fa-solid fa-gauge-high"></i>— FPS</span>
+    <span class="sb-sep"></span>
+    <span id="sb-uptime"><i class="fa-solid fa-clock"></i>0:00:00</span>
+  </div>
+  <div class="sb-r">
+    <i class="fa-solid fa-graduation-cap"></i>
+    VIT-AP University &nbsp;·&nbsp; Sentinel AI v4.0 &nbsp;·&nbsp; Siddhant Kumar
+  </div>
+</footer>
+
+<!-- ═══ OVERLAYS & MODALS ═══ -->
+
+<!-- Critical Alert Modal -->
+<div class="modal-overlay" id="modal-overlay" aria-hidden="true" onclick="if(event.target===this)dismissModal()">
+  <div class="modal-card">
+    <div class="modal-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+    <div class="modal-body-w">
+      <div class="modal-eyebrow">Critical Threat Detected</div>
+      <h2 class="modal-title" id="modal-title">—</h2>
+      <p class="modal-desc" id="modal-desc">—</p>
+      <p class="modal-cam" id="modal-cam">Camera: —</p>
+    </div>
+    <div class="modal-acts">
+      <button class="btn btn-ghost" onclick="dismissModal()">Dismiss</button>
+      <button class="btn btn-danger" onclick="dispatchTeam()"><i class="fa-solid fa-truck-fast"></i> Dispatch Team</button>
+    </div>
+    <button class="modal-close" onclick="dismissModal()"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+</div>
+
+<!-- Add Camera Modal -->
+<div class="modal-overlay" id="add-cam-modal" aria-hidden="true" onclick="if(event.target===this)closeAddCameraModal()">
+  <div class="modal-card modal-card--form">
+    <div class="modal-form-header">
+      <div><h2 class="modal-title">Add New Camera</h2><p class="modal-desc">Connect a webcam, IP camera, or RTSP stream</p></div>
+      <button class="modal-close" onclick="closeAddCameraModal()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <form id="add-cam-form" onsubmit="submitAddCamera(event)">
+      <div class="form-group"><label class="form-label">Camera Name *</label><input class="form-input" id="cam-name" placeholder="e.g. Main Entrance" required/></div>
+      <div class="form-group"><label class="form-label">Location</label><input class="form-input" id="cam-location" placeholder="e.g. Building A – Floor 2"/></div>
+      <div class="form-group">
+        <label class="form-label">Stream Source *</label>
+        <select class="form-input" id="cam-type" onchange="updateStreamLabel()">
+          <option value="webcam">Built-in Webcam (index)</option>
+          <option value="ip">IP Camera (HTTP)</option>
+          <option value="rtsp">RTSP Stream</option>
+          <option value="file">Video File</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label" id="stream-url-label">Webcam Index</label><input class="form-input" id="cam-url" placeholder="0" required/></div>
+      <div class="form-group form-group--inline">
+        <label class="form-label">Enable AI Detection</label>
+        <button type="button" class="toggle-btn toggle-on" id="cam-detect-toggle" onclick="this.classList.toggle('toggle-on')"></button>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeAddCameraModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Add Camera</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Camera Config Modal -->
+<div class="modal-overlay" id="config-modal" aria-hidden="true" onclick="if(event.target===this)closeConfigModal()">
+  <div class="modal-card modal-card--form">
+    <div class="modal-form-header">
+      <div><h2 class="modal-title" id="config-modal-title">Configure Camera</h2><p class="modal-desc">Update camera settings</p></div>
+      <button class="modal-close" onclick="closeConfigModal()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <form onsubmit="submitConfig(event)">
+      <div class="form-group"><label class="form-label">Camera Name</label><input class="form-input" id="cfg-name"/></div>
+      <div class="form-group"><label class="form-label">Location</label><input class="form-input" id="cfg-location"/></div>
+      <div class="form-group form-group--inline">
+        <label class="form-label">AI Detection Enabled</label>
+        <button type="button" class="toggle-btn toggle-on" id="cfg-detect-toggle" onclick="this.classList.toggle('toggle-on')"></button>
+      </div>
+      <div class="form-group form-group--inline">
+        <label class="form-label">Motion Alerts</label>
+        <button type="button" class="toggle-btn" id="cfg-motion-toggle" onclick="this.classList.toggle('toggle-on')"></button>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeConfigModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Cam Detail Modal -->
+<div class="modal-overlay" id="cam-detail-modal" aria-hidden="true" onclick="if(event.target===this)closeCamDetail()">
+  <div class="modal-card modal-card--feed">
+    <div class="modal-form-header">
+      <div><h2 class="modal-title" id="cam-detail-title">CAM-01 — Live Feed</h2></div>
+      <button class="modal-close" onclick="closeCamDetail()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="cam-detail-body" class="cam-detail-body">
+      <img id="cam-detail-img" src="" alt="Camera feed" style="width:100%;border-radius:6px;display:block"/>
+      <div id="cam-detail-offline" class="feed-empty" style="display:none;height:240px">
+        <i class="fa-solid fa-video-slash"></i><p>Camera Offline</p><span>No signal available</span>
+      </div>
+    </div>
+    <div class="modal-acts">
+      <button class="btn btn-ghost" onclick="closeCamDetail()">Close</button>
+      <button class="btn btn-primary" id="cam-detail-config-btn"><i class="fa-solid fa-sliders"></i> Configure</button>
+    </div>
+  </div>
+</div>
+
+<!-- Context Menu (cam options) -->
+<div class="context-menu" id="context-menu">
+  <button class="ctx-item" id="ctx-view"><i class="fa-solid fa-eye"></i> View Feed</button>
+  <button class="ctx-item" id="ctx-config"><i class="fa-solid fa-sliders"></i> Configure</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="ctx-snapshot"><i class="fa-solid fa-camera"></i> Take Snapshot</button>
+  <button class="ctx-item ctx-item--danger" id="ctx-disable"><i class="fa-solid fa-power-off"></i> Disable Camera</button>
+</div>
+
+<!-- Notification Drawer -->
+<div class="drawer-overlay" id="notif-drawer-overlay" onclick="closeNotifDrawer()" aria-hidden="true"></div>
+<aside class="drawer" id="notif-drawer" aria-hidden="true">
+  <div class="drawer-hdr">
+    <span class="panel-title"><i class="fa-solid fa-bell"></i> Notifications</span>
+    <button class="icon-btn icon-sm" onclick="closeNotifDrawer()"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+  <div class="drawer-body" id="notif-drawer-body">
+    <div class="empty-state"><div class="empty-icon"><i class="fa-solid fa-circle-check"></i></div><p class="empty-title">No notifications</p><p class="empty-sub">You're all caught up</p></div>
+  </div>
+</aside>
+
+<!-- User Menu Dropdown -->
+<div class="dropdown" id="user-dropdown">
+  <div class="dropdown-header">
+    <div class="user-chip-av" style="width:32px;height:32px;font-size:11px">SK</div>
+    <div><div class="user-name">Siddhant Kumar</div><div class="user-role" style="font-size:10px">24BCA7078 · VIT-AP</div></div>
+  </div>
+  <div class="dropdown-sep"></div>
+  <button class="dropdown-item" onclick="navigate('settings');closeUserMenu()"><i class="fa-solid fa-gear"></i> Settings</button>
+  <button class="dropdown-item" onclick="navigate('analytics');closeUserMenu()"><i class="fa-solid fa-chart-line"></i> Analytics</button>
+  <div class="dropdown-sep"></div>
+  <button class="dropdown-item dropdown-item--danger" onclick="showToast('Logged out successfully','success');closeUserMenu()"><i class="fa-solid fa-right-from-bracket"></i> Sign Out</button>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>

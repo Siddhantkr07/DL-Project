@@ -126,13 +126,6 @@ Sentinel-AI/
 - `GET /api/alerts`: Returns recent high-priority alerts.
 - `WS /stream`: WebSocket connection for real-time video stream frames and metadata.
 
-## Team
-
-- **Siddhant Kumar** (24BCA7078)
-- **Arava Kovid** (23BCE8596)
-- **S. Harsha Vardhan** (23BCE8166)
-VIT-AP University
-
 ## Citation
 
 If you find this project useful, please consider citing it.
