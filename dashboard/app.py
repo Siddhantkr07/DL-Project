@@ -17,10 +17,10 @@ YOLO_AVAILABLE = False
 _yolo_model = None
 try:
     from ultralytics import YOLO
-    # GPU ACTIVATED! Upgraded back to YOLOv8s (Small) for high accuracy!
-    _yolo_model = YOLO("yolov8s.pt")
+    # GPU ACTIVATED! Upgraded to YOLOv8m (Medium) for maximum accuracy on RTX 4050
+    _yolo_model = YOLO("yolov8m.pt")
     YOLO_AVAILABLE = True
-    log.info("YOLOv8s loaded on GPU ✅")
+    log.info("YOLOv8m loaded on GPU ✅")
 except Exception as e:
     log.warning(f"YOLOv8 not available: {e}")
 
