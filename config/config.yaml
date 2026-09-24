@@ -1,0 +1,51 @@
+system:
+  name: Sentinel AI
+  version: 1.0.0
+  log_level: INFO
+
+cameras:
+  max_cameras: 8
+  default_fps: 30
+  resolution: [1280, 720]
+
+detection:
+  model: yolov8n.pt
+  confidence_threshold: 0.5
+  iou_threshold: 0.45
+  device: auto  # auto, cpu, cuda, mps
+  target_classes: [person, car, truck, fire, knife, backpack]
+
+tracking:
+  max_age: 30
+  n_init: 3
+  max_cosine_distance: 0.4
+
+ccve:
+  feature_dim: 256
+  num_heads: 4
+  num_layers: 4
+  fusion_interval: 0.1  # seconds
+
+prioritizer:
+  update_interval: 0.5
+  severity_weight: 0.4
+  proximity_weight: 0.3
+  activity_weight: 0.2
+  context_weight: 0.1
+
+emergency:
+  min_severity_for_alert: 2
+  alert_cooldown: 30  # seconds
+  max_alert_history: 1000
+
+dashboard:
+  host: 0.0.0.0
+  port: 5000
+  debug: false
+  update_interval: 1.0  # seconds
+
+dataset:
+  name: UCF-Crime
+  kaggle_dataset: odins0n/ucf-crime-dataset
+  local_path: data/raw/ucf_crime
+  processed_path: data/processed

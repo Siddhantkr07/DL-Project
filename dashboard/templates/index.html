@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentinel AI - Security Operations Center</title>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Top Navbar -->
+    <header class="navbar">
+        <div class="logo">
+            <i class="fa-solid fa-shield-halved"></i>
+            <span>SENTINEL AI</span>
+        </div>
+        <div class="nav-center">
+            <div class="system-status">
+                <span class="status-indicator"></span>
+                <span>SYSTEM ONLINE</span>
+            </div>
+        </div>
+        <div class="nav-right">
+            <div id="clock" class="clock">00:00:00</div>
+            <div class="user-profile">
+                <i class="fa-solid fa-user-shield"></i> Admin
+            </div>
+        </div>
+    </header>
+
+    <div class="dashboard-container">
+        <!-- Left Sidebar: Camera List -->
+        <aside class="sidebar">
+            <h2 class="section-title"><i class="fa-solid fa-video"></i> Camera Feeds</h2>
+            <div class="camera-list" id="camera-list">
+                <!-- Camera cards will be inserted here by JS -->
+            </div>
+        </aside>
+
+        <!-- Main Area: Video Grid -->
+        <main class="main-content">
+            <div class="video-grid">
+                <div class="video-container" id="feed-cam-01">
+                    <div class="video-overlay">
+                        <span class="cam-id">CAM-01</span>
+                        <span class="cam-loc">Main Entrance</span>
+                    </div>
+                    <div class="placeholder-feed">
+                        <i class="fa-solid fa-satellite-dish fa-spin"></i>
+                        <p>Awaiting Feed</p>
+                    </div>
+                </div>
+                <div class="video-container" id="feed-cam-02">
+                    <div class="video-overlay">
+                        <span class="cam-id">CAM-02</span>
+                        <span class="cam-loc">Lobby</span>
+                    </div>
+                    <div class="placeholder-feed">
+                        <i class="fa-solid fa-satellite-dish fa-spin"></i>
+                        <p>Awaiting Feed</p>
+                    </div>
+                </div>
+                <div class="video-container" id="feed-cam-03">
+                    <div class="video-overlay">
+                        <span class="cam-id">CAM-03</span>
+                        <span class="cam-loc">Perimeter North</span>
+                    </div>
+                    <div class="placeholder-feed">
+                        <i class="fa-solid fa-satellite-dish fa-spin"></i>
+                        <p>Awaiting Feed</p>
+                    </div>
+                </div>
+                <div class="video-container" id="feed-cam-04">
+                    <div class="video-overlay">
+                        <span class="cam-id">CAM-04</span>
+                        <span class="cam-loc">Server Room</span>
+                    </div>
+                    <div class="placeholder-feed">
+                        <i class="fa-solid fa-satellite-dish fa-spin"></i>
+                        <p>Awaiting Feed</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <h3 class="section-title"><i class="fa-solid fa-chart-line"></i> Incident Timeline</h3>
+                <canvas id="incidentChart"></canvas>
+            </div>
+        </main>
+
+        <!-- Right Panel: Live Alert Feed -->
+        <aside class="alert-panel">
+            <h2 class="section-title"><i class="fa-solid fa-bell"></i> Live Alerts</h2>
+            <div class="alert-feed" id="alert-feed">
+                <!-- Alerts will be inserted here by JS -->
+            </div>
+        </aside>
+    </div>
+
+    <!-- Bottom Bar: System Stats -->
+    <footer class="bottom-bar">
+        <div class="stat-item">
+            <span class="stat-label">Active Cameras</span>
+            <span class="stat-value" id="stat-active-cams">4</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Total Incidents</span>
+            <span class="stat-value" id="stat-incidents">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Avg System FPS</span>
+            <span class="stat-value" id="stat-avg-fps">0.0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">AI Compute Load</span>
+            <span class="stat-value">64%</span>
+        </div>
+    </footer>
+
+    <!-- Critical Alert Popup Overlay -->
+    <div class="overlay" id="critical-overlay">
+        <div class="critical-popup">
+            <div class="popup-header">
+                <i class="fa-solid fa-triangle-exclamation fa-beat-fade"></i>
+                <h2>CRITICAL ALERT</h2>
+            </div>
+            <div class="popup-body" id="popup-body">
+                <!-- Details here -->
+            </div>
+            <button class="btn-acknowledge" onclick="document.getElementById('critical-overlay').style.display='none'">ACKNOWLEDGE</button>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.1/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+env/
+.env
+.venv
+
+# Model Weights
+*.pt
+*.pth
+*.h5
+*.onnx
+
+# Datasets
+data/raw/
+data/processed/
+
+# Logs and Checkpoints
+logs/
+*.log
+runs/
+wandb/
+checkpoints/
+
+# IDE and OS Files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
