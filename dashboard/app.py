@@ -214,6 +214,10 @@ class CameraStream:
             if not ret:
                 time.sleep(0.1)
                 continue
+            
+            # Flip horizontally for natural mirror view (laptop webcam only)
+            if str(self.source).isdigit() or self.source == 0:
+                frame = cv2.flip(frame, 1)
 
             now = time.time()
             fps = round(1.0/max(now-prev, 1e-9), 1)
