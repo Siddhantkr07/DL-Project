@@ -68,9 +68,10 @@ class ThreatEngine:
                 obj["track_id"] = track_id
 
                 if cls_name == self.PERSON_CLASS:
-                    # Fall Detection Heuristic (if width > height * 1.2)
+                    # Fall Detection — only trigger if bbox is VERY wide vs tall (clearly lying down)
+                    # Ratio 1.8 prevents false positives for sitting/leaning people
                     w, h = x2 - x1, y2 - y1
-                    if w > h * 1.2:
+                    if w > h * 1.8:
                         obj["fallen"] = True
                     persons.append(obj)
                 elif cls_name in self.WEAPON_CLASSES:  weapons.append(obj)
@@ -105,7 +106,8 @@ class ThreatEngine:
             reasons.append(f"HIGH OCCUPANCY — {n} persons")
             tags.append("crowd")
 
-        close = [p for p in persons if p["prox"] > 0.30]
+        # Proximity Breach — only trigger if subject fills >55% of frame (very close/intruding)
+        close = [p for p in persons if p["prox"] > 0.55]
         if close:
             if self.LEVEL_RANK[level] < self.LEVEL_RANK["WARNING"]: level = "WARNING"
             reasons.append("PROXIMITY BREACH — subject too close")
