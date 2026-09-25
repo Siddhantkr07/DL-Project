@@ -1,131 +1,66 @@
-# 🛡️ Sentinel AI - Cognitive Multi-Camera Vision System
+# 🛡️ Sentinel AI – Enterprise-Grade Cognitive Vision System
 
-![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange.svg)
-![YOLOv8](https://img.shields.io/badge/YOLOv8-latest-brightgreen.svg)
-![License](https://img.shields.io/badge/License-MIT-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python)
+![PyTorch](https://img.shields.io/badge/PyTorch-CUDA_12.1-ee4c2c?style=for-the-badge&logo=pytorch)
+![YOLO11](https://img.shields.io/badge/YOLO11-Ultralytics-black?style=for-the-badge)
+![TensorRT](https://img.shields.io/badge/TensorRT-NVIDIA-76B900?style=for-the-badge&logo=nvidia)
+![OpenAI CLIP](https://img.shields.io/badge/OpenAI-CLIP_ViT-white?style=for-the-badge&logo=openai)
 
-## Project Description
+Sentinel AI is a high-performance, multi-layered threat intelligence system designed for real-time surveillance. Moving beyond standard bounding-box detection, this project implements a **Three-Stage Industry Pipeline** (Skeleton Tracking + Object Detection + Zero-Shot Verification) to achieve near-zero false positives.
 
-Sentinel AI is a cognitive multi-camera surveillance system designed for dynamic real-time threat detection, tracking, and resource allocation. It moves beyond traditional passive surveillance by actively analyzing feeds from multiple cameras to identify emergencies, track individuals across feeds, and intelligently prioritize critical streams. By utilizing a Multi-Camera Cross-View Embedder (CCVE) and an Event Prioritization & Resource Allocator (EPRA) module, Sentinel AI dramatically reduces the cognitive load on human operators while ensuring optimal utilization of computational resources.
+## 🚀 The Enterprise Architecture
 
-## Architecture Diagram
+Our pipeline is heavily optimized for edge deployment (specifically tested on RTX 4050 6GB).
 
-```text
-+-------------------------------------------------------------------------------------------------+
-|                                     Sentinel AI Architecture                                    |
-+-------------------------------------------------------------------------------------------------+
-|   Camera 1   | |   Camera 2   | |   Camera 3   | ... |   Camera N   | (Input Streams)           |
-+------+-------+ +------+-------+ +------+-------+     +------+-------+                           |
-       |                |                |                    |                                   |
-+------v----------------v----------------v--------------------v-----------------------------------+
-|                            Dynamic Feature Extraction Pipeline                                  |
-|  [ YOLOv8 Object Detection ] + [ DeepSORT Object Tracking ] + [ Spatial-Temporal Encoding ]     |
-+----------------------------------------+--------------------------------------------------------+
-                                         |
-+----------------------------------------v--------------------------------------------------------+
-|                      Cross-Camera View Embedder (CCVE) / Data Fusion                            |
-|       Integrates Multi-View Features -> Attention Mechanism -> Unified Spatial Context          |
-+----------------------------------------+--------------------------------------------------------+
-                                         |
-+----------------------------------------v--------------------------------------------------------+
-|                  Event Prioritization & Resource Allocator (EPRA) Module                        |
-|  [ Compute Threat Severity ] -> [ Estimate Proximity/Context ] -> [ Stream Priority Score ]     |
-+----------------------------------------+--------------------------------------------------------+
-                                         |
-+----------------------------------------v--------------------------------------------------------+
-|                                Command & Control Dashboard                                      |
-|    - High-Priority Feeds Enlarged               - Real-Time Alerts & Bounding Boxes             |
-|    - Cross-Camera Tracking Visualization        - System Health & Resource Metrics              |
-+-------------------------------------------------------------------------------------------------+
-```
+### 1. Dual-Model Tracking System (Layer 1)
+*   **YOLO11x-Pose (Skeleton Tracking):** Instead of relying on generic shapes, humans are detected and tracked using 17 specific body keypoints. This entirely eliminates false positives where objects (like chairs or bags) are misclassified as people.
+*   **YOLO11x (Object Detection):** Runs in parallel to detect critical threats like weapons (knives/guns), vehicles, and hazards (fire/smoke).
+*   **ByteTrack:** Advanced object tracking maintains consistent IDs across frames.
 
-## Features
+### 2. Zero-Shot Verification Pipeline (Layer 2)
+*   **OpenAI CLIP (Vision Transformer):** When YOLO detects a potential critical threat (e.g., a weapon), the region of interest (ROI) is cropped and passed to a ViT-B/32 CLIP model. 
+*   **Cross-Examination:** CLIP acts as a secondary verifier, checking against precise textual prompts ("a deadly knife" vs "a smartphone" vs "a pen"). If CLIP rejects the threat, the alert is silently dropped, eliminating false alarms.
 
-- **Multi-Camera Synthesis:** Fuses multiple video streams into a unified understanding of the physical space.
-- **Dynamic Threat Detection:** Identifies anomalies (e.g., weapons, fights, fires, anomalous crowd behavior) in real-time.
-- **Cross-Camera Tracking:** Tracks individuals consistently as they move across different camera fields of view.
-- **Intelligent Resource Allocation:** Dynamically reallocates CPU/GPU resources and dashboard screen space to the most critical events.
-- **Operator-Centric Dashboard:** Automatically surfaces high-priority feeds, reducing fatigue and improving response times.
+### 3. Threat Intelligence Engine & Temporal Smoothing (Layer 3)
+*   **Temporal Buffer:** A 5-frame rolling buffer ensures alerts are only triggered if a threat is consistently detected for ~0.3 seconds.
+*   **Pose-Based Fall Detection:** Fall detection relies on strict spatial geometry (e.g., checking if *both* ankles are visible with >50% confidence and located on the same horizontal plane as the shoulders).
+*   **Dynamic Alerting:** Alerts are classified into INFO, WARNING, and CRITICAL based on severity, crowd density, and proximity breaches.
 
-## Installation
+---
 
-```bash
-# Clone the repository
-git clone https://github.com/your-username/Sentinel-AI.git
-cd Sentinel-AI
+## 💻 Tech Stack
+*   **Core ML:** PyTorch, Ultralytics (YOLO11), HuggingFace Transformers (CLIP).
+*   **Computer Vision:** OpenCV, ByteTrack.
+*   **Hardware Acceleration:** CUDA, NVIDIA TensorRT.
+*   **Backend & Dashboard:** Flask, Flask-SocketIO (WebSockets), JavaScript, Chart.js.
 
-# Create a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+---
 
-# Install dependencies
-pip install -r requirements.txt
-```
+## ⚙️ Hardware Acceleration (TensorRT)
+For maximum frames per second (FPS), the models can be compiled from `.pt` to NVIDIA TensorRT `.engine` formats. 
+*Note: `.engine` files are highly hardware-specific and are not included in this repository. They must be compiled on the host machine.*
 
-## Quick Start
+---
 
-Run the system in simulation mode to see a demonstration without external hardware:
+## 🛠️ How to Run Locally
 
-```bash
-python main.py --mode demo --cameras 4 --dashboard True
-```
+1. **Clone & Setup:**
+   ```bash
+   git clone https://github.com/Siddhantkr07/DL-Project.git
+   cd DL-Project
+   pip install -r requirements.txt
+   ```
+2. **Launch the Server:**
+   ```bash
+   python dashboard/app.py
+   ```
+3. **Open Dashboard:**
+   Navigate to `http://127.0.0.1:5000` in your web browser.
 
-This will spin up 4 simulated cameras, start the AI pipeline, and launch the web dashboard at `http://localhost:5000`.
+---
 
-## Dataset Setup
-
-We use the UCF-Crime dataset from Kaggle for training and testing anomaly detection scenarios.
-
-1. Ensure you have a Kaggle account and an API key (`kaggle.json`).
-2. Place `kaggle.json` in `~/.kaggle/` (Linux/Mac) or `C:\Users\<User>\.kaggle\` (Windows).
-3. Run the download script:
-
-```bash
-python data/download_dataset.py
-```
-
-## Project Structure
-
-```text
-Sentinel-AI/
-├── config/
-│   └── config.yaml             # System configuration parameters
-├── data/
-│   ├── download_dataset.py     # Script to fetch UCF-Crime/MOT17
-│   ├── dataset_loader.py       # Data loading and preprocessing pipeline
-│   └── README.md
-├── models/
-│   └── README.md               # Model weights documentation
-├── notebooks/
-│   └── sentinel_ai_demo.py     # Interactive demo script
-├── simulation/
-│   ├── __init__.py
-│   ├── camera_simulator.py     # Multi-camera feed simulation
-│   └── scenario_generator.py   # Synthetic event scenario generation
-├── tests/
-│   ├── __init__.py
-│   ├── test_detector.py
-│   └── test_prioritizer.py
-├── .gitignore
-├── main.py                     # Main application entry point
-├── README.md                   # Project documentation (You are here)
-└── requirements.txt            # Python dependencies
-```
-
-## How It Works
-
-1. **Feature Extraction Pipeline:** Captures video streams and runs YOLOv8 for rapid object detection, followed by DeepSORT for reliable frame-to-frame object tracking.
-2. **Cross-Camera View Embedder (CCVE):** A custom neural network layer that takes features from multiple cameras and aligns them spatially to map how objects in one camera relate to another.
-3. **Event Prioritization Module (EPRA):** Computes a dynamic Priority Score for each camera feed based on the severity of detections, the proximity to critical areas, and historical context.
-4. **Command Dashboard:** A Flask-based web interface that dynamically adjusts its layout to emphasize high-priority camera feeds and logs critical alerts.
-
-## API Documentation
-
-- `GET /api/status`: Returns current system health and camera status.
-- `GET /api/alerts`: Returns recent high-priority alerts.
-- `WS /stream`: WebSocket connection for real-time video stream frames and metadata.
-
-## Citation
-
-If you find this project useful, please consider citing it.
+## 👥 The Team
+**VIT-AP University**
+*   **Siddhant Kumar** (24BCA7078)
+*   **Arava Kovid** (23BCE8596)
+*   **S. Harsha Vardhan** (23BCE8166)
