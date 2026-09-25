@@ -24,12 +24,21 @@ try:
 except Exception as e:
     log.warning(f"YOLOv8 not available: {e}")
 
-# ── Threat Intelligence Engine ─────────────────────────────────────────────────
+# ── Threat Intelligence Engine (v2 — Temporal Smoothing) ─────────────────────
 class ThreatEngine:
-    WEAPON_CLASSES   = {"knife", "gun", "pistol", "rifle", "scissors"}
-    HAZARD_CLASSES   = {"fire", "smoke"}
-    VEHICLE_CLASSES  = {"car", "truck", "motorcycle", "bus"}
-    PERSON_CLASS     = "person"
+    WEAPON_CLASSES  = {"knife", "scissors"}          # Only real COCO weapon classes
+    HAZARD_CLASSES  = {"fire", "smoke"}
+    VEHICLE_CLASSES = {"car", "truck", "motorcycle", "bus"}
+    PERSON_CLASS    = "person"
+
+    # Confidence thresholds — raised significantly to kill false positives
+    CONF_PERSON  = 0.60   # Person must be 60% confident
+    CONF_WEAPON  = 0.75   # Weapon must be 75% confident (very strict)
+    CONF_VEHICLE = 0.55
+    CONF_DEFAULT = 0.55
+
+    # Temporal buffer: threat must be seen in N consecutive frames before alerting
+    SMOOTHING_FRAMES = 5   # ~5 frames at 15fps ≈ 0.3 seconds of consistent detection
 
     LEVEL_RANK = {"SAFE": 0, "INFO": 1, "WARNING": 2, "CRITICAL": 3}
     LEVEL_COLOR = {
@@ -39,8 +48,19 @@ class ThreatEngine:
         "CRITICAL": "#f43f5e",
     }
 
+    def __init__(self):
+        # Circular buffer tracking how many of last N frames had each threat tag
+        self._buffers = defaultdict(lambda: deque(maxlen=self.SMOOTHING_FRAMES))
+
     def _proximity_ratio(self, x1, y1, x2, y2, W, H) -> float:
         return ((x2 - x1) * (y2 - y1)) / max(W * H, 1)
+
+    def _smooth(self, tag: str, detected: bool) -> bool:
+        """Push detection result into rolling buffer. Return True only if
+        the tag was detected in ALL of the last SMOOTHING_FRAMES frames."""
+        self._buffers[tag].append(1 if detected else 0)
+        buf = self._buffers[tag]
+        return len(buf) == self.SMOOTHING_FRAMES and sum(buf) == self.SMOOTHING_FRAMES
 
     def analyse(self, results, frame_shape) -> dict:
         H, W = frame_shape[:2]
@@ -53,25 +73,28 @@ class ThreatEngine:
                 cls_id = int(box.cls[0])
                 cls_name = results[0].names[cls_id].lower()
 
-                # STRICTER CONFIDENCE: Weapons need > 55% to avoid toothbrush=knife
-                if cls_name in self.WEAPON_CLASSES and conf < 0.55:
+                # Per-class confidence thresholds
+                if cls_name == self.PERSON_CLASS and conf < self.CONF_PERSON:
                     continue
-                # Base confidence for others: 45% (better range than before)
-                elif conf < 0.45:
+                elif cls_name in self.WEAPON_CLASSES and conf < self.CONF_WEAPON:
                     continue
+                elif cls_name in self.VEHICLE_CLASSES and conf < self.CONF_VEHICLE:
+                    continue
+                elif cls_name not in (self.WEAPON_CLASSES | self.HAZARD_CLASSES |
+                                      self.VEHICLE_CLASSES | {self.PERSON_CLASS}):
+                    if conf < self.CONF_DEFAULT:
+                        continue
 
-                x1,y1,x2,y2 = map(int, box.xyxy[0].tolist())
-                prox = self._proximity_ratio(x1,y1,x2,y2, W, H)
-                obj = dict(cls=cls_name, conf=round(conf,2), prox=round(prox,3), bbox=[x1,y1,x2,y2])
-                
+                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                prox = self._proximity_ratio(x1, y1, x2, y2, W, H)
                 track_id = int(box.id[0]) if box.id is not None else None
-                obj["track_id"] = track_id
+                obj = dict(cls=cls_name, conf=round(conf, 2), prox=round(prox, 3),
+                           bbox=[x1, y1, x2, y2], track_id=track_id)
 
                 if cls_name == self.PERSON_CLASS:
-                    # Fall Detection — only trigger if bbox is VERY wide vs tall (clearly lying down)
-                    # Ratio 1.8 prevents false positives for sitting/leaning people
-                    w, h = x2 - x1, y2 - y1
-                    if w > h * 1.8:
+                    # Fall: bounding box width > 2x height (clearly horizontal)
+                    bw, bh = x2 - x1, y2 - y1
+                    if bh > 0 and bw > bh * 2.0:
                         obj["fallen"] = True
                     persons.append(obj)
                 elif cls_name in self.WEAPON_CLASSES:  weapons.append(obj)
@@ -79,44 +102,52 @@ class ThreatEngine:
                 elif cls_name in self.VEHICLE_CLASSES: vehicles.append(obj)
                 else:                                  other.append(obj)
 
+        # ── Temporal smoothing checks ─────────────────────────────────────────
+        fallen_confirmed  = self._smooth("fall",      any(p.get("fallen") for p in persons))
+        weapon_confirmed  = self._smooth("weapon",    len(weapons) > 0)
+        hazard_confirmed  = self._smooth("hazard",    len(hazards) > 0)
+        crowd_surge       = self._smooth("crowd10",   len(persons) >= 10)
+        crowd_high        = self._smooth("crowd5",    5 <= len(persons) < 10)
+        # Proximity: person fills >65% of frame for SMOOTHING_FRAMES in a row
+        prox_confirmed    = self._smooth("prox",
+                                len([p for p in persons if p["prox"] > 0.65]) > 0)
+
         level, reasons, tags = "SAFE", [], []
-        
-        fallen_count = sum(1 for p in persons if p.get("fallen"))
-        if fallen_count > 0:
+
+        if fallen_confirmed:
             level = "CRITICAL"
-            reasons.append(f"FALL DETECTED: {fallen_count} person(s) down")
+            reasons.append("FALL DETECTED — person down")
             tags.append("fall")
 
-        if weapons:
+        if weapon_confirmed:
             level = "CRITICAL"
             reasons.append(f"WEAPON DETECTED: {weapons[0]['cls'].upper()}")
             tags.append("weapon")
-        if hazards:
+
+        if hazard_confirmed:
             level = "CRITICAL"
             reasons.append(f"HAZARD: {hazards[0]['cls'].upper()}")
             tags.append("hazard")
 
-        n = len(persons)
-        if n >= 10:
+        if crowd_surge:
             level = "CRITICAL"
-            reasons.append(f"CROWD SURGE — {n} persons")
+            reasons.append(f"CROWD SURGE — {len(persons)} persons")
             tags.append("crowd")
-        elif n >= 5:
+        elif crowd_high:
             if self.LEVEL_RANK[level] < self.LEVEL_RANK["WARNING"]: level = "WARNING"
-            reasons.append(f"HIGH OCCUPANCY — {n} persons")
+            reasons.append(f"HIGH OCCUPANCY — {len(persons)} persons")
             tags.append("crowd")
 
-        # Proximity Breach — only trigger if subject fills >55% of frame (very close/intruding)
-        close = [p for p in persons if p["prox"] > 0.55]
-        if close:
+        if prox_confirmed:
             if self.LEVEL_RANK[level] < self.LEVEL_RANK["WARNING"]: level = "WARNING"
             reasons.append("PROXIMITY BREACH — subject too close")
             tags.append("proximity")
 
         if not reasons:
+            n = len(persons)
             if persons:
                 level = "INFO"
-                reasons.append(f"{n} person{'s' if n>1 else ''} monitored")
+                reasons.append(f"{n} person{'s' if n > 1 else ''} monitored")
                 tags.append("normal")
             elif vehicles:
                 level = "INFO"
@@ -126,15 +157,17 @@ class ThreatEngine:
                 level = "SAFE"
                 reasons.append("Area clear")
 
-        assessment = {
-            "level": level, "color": self.LEVEL_COLOR[level], "reasons": reasons, "tags": tags,
-            "counts": {"persons": len(persons), "weapons": len(weapons), "hazards": len(hazards), "vehicles": len(vehicles), "other": len(other)},
+        return {
+            "level": level, "color": self.LEVEL_COLOR[level],
+            "reasons": reasons, "tags": tags,
+            "counts": {"persons": len(persons), "weapons": len(weapons),
+                       "hazards": len(hazards), "vehicles": len(vehicles), "other": len(other)},
             "objects": persons + weapons + hazards + vehicles + other,
             "ts": now,
         }
-        return assessment
 
 _threat_engine = ThreatEngine()
+
 
 # ── Multi-Camera Manager ───────────────────────────────────────────────────────
 CLS_COLORS = {"person": (0, 230, 120), "car": (0, 190, 255), "truck": (0, 100, 255), "knife": (0, 0, 255), "fire": (0, 80, 255), "default": (180, 180, 0)}
