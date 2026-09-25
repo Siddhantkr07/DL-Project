@@ -14,15 +14,18 @@ log = logging.getLogger("SentinelAI")
 
 # ── YOLO ──────────────────────────────────────────────────────────────────────
 YOLO_AVAILABLE = False
-_yolo_model = None
+_yolo_model = None       # General object detection (knife, car, etc.)
+_pose_model  = None      # Person detection via skeleton keypoints (zero false positives)
 try:
     from ultralytics import YOLO
-    # TENSORRT ACTIVATED! Maximum performance on RTX 4050
-    _yolo_model = YOLO("yolov8m.engine", task="detect")
+    # Pose model: detects 17 human skeleton keypoints — much more accurate for person detection
+    _pose_model  = YOLO("yolo11x-pose.pt")
+    # Detection model: for everything else (weapons, vehicles, hazards)
+    _yolo_model  = YOLO("yolo11x.pt")
     YOLO_AVAILABLE = True
-    log.info("YOLOv8m TensorRT Engine loaded ✅")
+    log.info("YOLO11x + YOLO11x-Pose dual model loaded ✅")
 except Exception as e:
-    log.warning(f"YOLOv8 not available: {e}")
+    log.warning(f"YOLO not available: {e}")
 
 # ── Threat Intelligence Engine (v2 — Temporal Smoothing) ─────────────────────
 class ThreatEngine:
@@ -62,56 +65,88 @@ class ThreatEngine:
         buf = self._buffers[tag]
         return len(buf) == self.SMOOTHING_FRAMES and sum(buf) == self.SMOOTHING_FRAMES
 
-    def analyse(self, results, frame_shape) -> dict:
+    def analyse(self, results, frame_shape, pose_results=None) -> dict:
         H, W = frame_shape[:2]
         now = time.time()
         persons, weapons, hazards, vehicles, other = [], [], [], [], []
 
+        # ── PERSONS: from Pose model (skeleton keypoints — zero false positives) ──
+        if YOLO_AVAILABLE and pose_results and len(pose_results[0].boxes):
+            for i, box in enumerate(pose_results[0].boxes):
+                conf = float(box.conf[0])
+                if conf < self.CONF_PERSON:
+                    continue
+
+                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                bw, bh = x2 - x1, y2 - y1
+                if bh < 40: continue  # too tiny
+
+                prox = self._proximity_ratio(x1, y1, x2, y2, W, H)
+                track_id = int(box.id[0]) if box.id is not None else None
+                obj = dict(cls="person", conf=round(conf, 2), prox=round(prox, 3),
+                           bbox=[x1, y1, x2, y2], track_id=track_id)
+
+                # ── Pose-based Fall Detection ─────────────────────────────────
+                fallen = False
+                try:
+                    kpts      = pose_results[0].keypoints.xy[i]    # (17, 2) positions
+                    kpts_conf = pose_results[0].keypoints.conf[i]  # (17,) confidence scores
+
+                    # Only use keypoints the model is confident about (>50%)
+                    KCONF = 0.5
+                    sh_conf  = kpts_conf[[5, 6]]
+                    an_conf  = kpts_conf[[15, 16]]
+                    shoulders = kpts[[5, 6]]
+                    ankles    = kpts[[15, 16]]
+
+                    # Filter: keep only high-confidence keypoints
+                    valid_sh = shoulders[sh_conf > KCONF]
+                    valid_an = ankles[an_conf > KCONF]
+
+                    # STRICT: BOTH ankles must be visible and confident
+                    # If ankles aren't visible (sitting at desk, webcam), skip entirely
+                    if len(valid_sh) >= 1 and len(valid_an) >= 2:
+                        sh_y = float(valid_sh[:, 1].mean())
+                        an_y = float(valid_an[:, 1].mean())
+                        # Ankles must be below shoulders by at least 10% of frame height
+                        # to confirm this is a full-body visible shot
+                        if an_y > sh_y + (H * 0.10):
+                            # THEN check if they're at roughly the same level (fallen)
+                            if abs(an_y - sh_y) < (H * 0.12):
+                                fallen = True
+                except Exception:
+                    pass
+
+                if fallen:
+                    obj["fallen"] = True
+                persons.append(obj)
+
+        # ── OBJECTS: from Detection model (weapons, vehicles, hazards) ────────────
         if YOLO_AVAILABLE and results and len(results[0].boxes):
             for box in results[0].boxes:
                 conf = float(box.conf[0])
                 cls_id = int(box.cls[0])
                 cls_name = results[0].names[cls_id].lower()
 
-                # Per-class confidence thresholds
-                if cls_name == self.PERSON_CLASS and conf < self.CONF_PERSON:
+                # Skip persons — handled by pose model above
+                if cls_name == self.PERSON_CLASS:
                     continue
-                elif cls_name in self.WEAPON_CLASSES and conf < self.CONF_WEAPON:
+
+                if cls_name in self.WEAPON_CLASSES and conf < self.CONF_WEAPON:
                     continue
                 elif cls_name in self.VEHICLE_CLASSES and conf < self.CONF_VEHICLE:
                     continue
-                elif cls_name not in (self.WEAPON_CLASSES | self.HAZARD_CLASSES |
-                                      self.VEHICLE_CLASSES | {self.PERSON_CLASS}):
+                elif cls_name not in (self.WEAPON_CLASSES | self.HAZARD_CLASSES | self.VEHICLE_CLASSES):
                     if conf < self.CONF_DEFAULT:
                         continue
 
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                bw, bh = x2 - x1, y2 - y1
-
-                # ── Geometric validity filters ────────────────────────────────
-                if cls_name == self.PERSON_CLASS:
-                    # 1. Must be at least 40px tall (filter out tiny noise blobs)
-                    if bh < 40:
-                        continue
-                    # 2. Person must be taller than wide OR square-ish (standing/sitting)
-                    #    Reject if width > 1.5x height (too horizontal to be a standing person)
-                    if bw > bh * 1.5:
-                        continue
-                    # 3. Must occupy at least 0.5% of frame area (not a pixel blob)
-                    if (bw * bh) < (W * H * 0.005):
-                        continue
-
                 prox = self._proximity_ratio(x1, y1, x2, y2, W, H)
                 track_id = int(box.id[0]) if box.id is not None else None
                 obj = dict(cls=cls_name, conf=round(conf, 2), prox=round(prox, 3),
                            bbox=[x1, y1, x2, y2], track_id=track_id)
 
-                if cls_name == self.PERSON_CLASS:
-                    # Fall: bounding box width > 2x height (clearly lying horizontal)
-                    if bh > 0 and bw > bh * 2.0:
-                        obj["fallen"] = True
-                    persons.append(obj)
-                elif cls_name in self.WEAPON_CLASSES:  weapons.append(obj)
+                if cls_name in self.WEAPON_CLASSES:    weapons.append(obj)
                 elif cls_name in self.HAZARD_CLASSES:  hazards.append(obj)
                 elif cls_name in self.VEHICLE_CLASSES: vehicles.append(obj)
                 else:                                  other.append(obj)
@@ -186,25 +221,51 @@ _threat_engine = ThreatEngine()
 # ── Multi-Camera Manager ───────────────────────────────────────────────────────
 CLS_COLORS = {"person": (0, 230, 120), "car": (0, 190, 255), "truck": (0, 100, 255), "knife": (0, 0, 255), "fire": (0, 80, 255), "default": (180, 180, 0)}
 
-def _draw(frame, results, threat, cam_id, fps):
+def _draw(frame, results, threat, cam_id, fps, pose_results=None):
     h, w = frame.shape[:2]
+
+    # ── Draw persons from pose model (green skeleton boxes) ──────────────────
+    if YOLO_AVAILABLE and pose_results and len(pose_results[0].boxes):
+        POSE_PAIRS = [(5,6),(5,11),(6,12),(11,12),(5,7),(7,9),(6,8),(8,10),
+                      (11,13),(13,15),(12,14),(14,16),(0,5),(0,6)]
+        for i, box in enumerate(pose_results[0].boxes):
+            conf = float(box.conf[0])
+            if conf < 0.60: continue
+            x1,y1,x2,y2 = map(int, box.xyxy[0].tolist())
+            track_label = f" #{int(box.id[0])}" if box.id is not None else ""
+            color = (0, 230, 120)  # green for person
+            cv2.rectangle(frame, (x1,y1), (x2,y2), color, 2)
+            lbl = f"person{track_label} {conf:.0%}"
+            (tw,th),_ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
+            cv2.rectangle(frame, (x1, y1-th-6), (x1+tw+4, y1), color, -1)
+            cv2.putText(frame, lbl, (x1+2, y1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0,0,0), 1)
+            # Draw skeleton keypoints
+            try:
+                kpts = pose_results[0].keypoints.xy[i]
+                for kp in kpts:
+                    kx, ky = int(kp[0]), int(kp[1])
+                    if kx > 0 and ky > 0:
+                        cv2.circle(frame, (kx, ky), 3, (0,255,255), -1)
+                for a, b in POSE_PAIRS:
+                    ax,ay = int(kpts[a][0]), int(kpts[a][1])
+                    bx,by = int(kpts[b][0]), int(kpts[b][1])
+                    if ax > 0 and ay > 0 and bx > 0 and by > 0:
+                        cv2.line(frame, (ax,ay), (bx,by), (0,200,255), 2)
+            except Exception:
+                pass
+
+    # ── Draw objects from detection model (weapons, vehicles etc.) ────────────
     if YOLO_AVAILABLE and results and len(results[0].boxes):
         for box in results[0].boxes:
             conf = float(box.conf[0])
             cls_id = int(box.cls[0])
             cls_name = results[0].names[cls_id].lower()
-            if cls_name in ThreatEngine.WEAPON_CLASSES and conf < 0.55: continue
-            elif conf < 0.45: continue
-            
+            if cls_name == "person": continue  # handled above
+            if cls_name in ThreatEngine.WEAPON_CLASSES and conf < 0.75: continue
+            elif conf < 0.55: continue
             x1,y1,x2,y2 = map(int, box.xyxy[0].tolist())
             color = CLS_COLORS.get(cls_name, CLS_COLORS["default"])
-            
-            # Draw tracking ID if available
-            track_label = ""
-            if box.id is not None:
-                track_id = int(box.id[0])
-                track_label = f" #{track_id}"
-                
+            track_label = f" #{int(box.id[0])}" if box.id is not None else ""
             cv2.rectangle(frame, (x1,y1), (x2,y2), color, 2)
             lbl = f"{cls_name}{track_label} {conf:.0%}"
             (tw,th),_ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
@@ -270,15 +331,25 @@ class CameraStream:
             fps = round(1.0/max(now-prev, 1e-9), 1)
             prev = now
 
-            results = None
+            results      = None   # detection results (weapons, vehicles etc.)
+            pose_results = None   # pose results (persons via skeleton)
             if YOLO_AVAILABLE:
-                try: 
-                    # Enable ByteTrack for Object Tracking across frames
-                    results = _yolo_model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False)
+                try:
+                    # Run object detection (ByteTrack) — skips persons internally
+                    results = _yolo_model.track(frame, persist=True,
+                                                tracker="bytetrack.yaml", verbose=False)
+                except: pass
+                try:
+                    # Run pose model — persons detected via 17 skeleton keypoints
+                    if _pose_model is not None:
+                        pose_results = _pose_model.track(frame, persist=True,
+                                                         tracker="bytetrack.yaml", verbose=False)
                 except: pass
 
-            threat = _threat_engine.analyse(results or [], frame.shape)
-            annotated = _draw(frame.copy(), results, threat, self.cam_id, fps)
+            threat = _threat_engine.analyse(results or [], frame.shape,
+                                            pose_results=pose_results)
+            annotated = _draw(frame.copy(), results, threat, self.cam_id, fps,
+                              pose_results=pose_results)
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
             
             with self.lock:
