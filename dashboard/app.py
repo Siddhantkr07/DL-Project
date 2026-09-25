@@ -32,7 +32,7 @@ class ThreatEngine:
     PERSON_CLASS    = "person"
 
     # Confidence thresholds — raised significantly to kill false positives
-    CONF_PERSON  = 0.60   # Person must be 60% confident
+    CONF_PERSON  = 0.70   # Person must be 70% confident (strict to avoid object=person)
     CONF_WEAPON  = 0.75   # Weapon must be 75% confident (very strict)
     CONF_VEHICLE = 0.55
     CONF_DEFAULT = 0.55
@@ -86,14 +86,28 @@ class ThreatEngine:
                         continue
 
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                bw, bh = x2 - x1, y2 - y1
+
+                # ── Geometric validity filters ────────────────────────────────
+                if cls_name == self.PERSON_CLASS:
+                    # 1. Must be at least 40px tall (filter out tiny noise blobs)
+                    if bh < 40:
+                        continue
+                    # 2. Person must be taller than wide OR square-ish (standing/sitting)
+                    #    Reject if width > 1.5x height (too horizontal to be a standing person)
+                    if bw > bh * 1.5:
+                        continue
+                    # 3. Must occupy at least 0.5% of frame area (not a pixel blob)
+                    if (bw * bh) < (W * H * 0.005):
+                        continue
+
                 prox = self._proximity_ratio(x1, y1, x2, y2, W, H)
                 track_id = int(box.id[0]) if box.id is not None else None
                 obj = dict(cls=cls_name, conf=round(conf, 2), prox=round(prox, 3),
                            bbox=[x1, y1, x2, y2], track_id=track_id)
 
                 if cls_name == self.PERSON_CLASS:
-                    # Fall: bounding box width > 2x height (clearly horizontal)
-                    bw, bh = x2 - x1, y2 - y1
+                    # Fall: bounding box width > 2x height (clearly lying horizontal)
                     if bh > 0 and bw > bh * 2.0:
                         obj["fallen"] = True
                     persons.append(obj)
