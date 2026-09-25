@@ -1,4 +1,4 @@
-# 🛡️ Sentinel AI – Enterprise-Grade Cognitive Vision System
+# 🛡️ Sentinel AI – Cognitive Surveillance System
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python)
 ![PyTorch](https://img.shields.io/badge/PyTorch-CUDA_12.1-ee4c2c?style=for-the-badge&logo=pytorch)
@@ -6,39 +6,39 @@
 ![TensorRT](https://img.shields.io/badge/TensorRT-NVIDIA-76B900?style=for-the-badge&logo=nvidia)
 ![OpenAI CLIP](https://img.shields.io/badge/OpenAI-CLIP_ViT-white?style=for-the-badge&logo=openai)
 
-Sentinel AI is a high-performance, multi-layered threat intelligence system designed for real-time surveillance. Moving beyond standard bounding-box detection, this project implements a **Three-Stage Industry Pipeline** (Skeleton Tracking + Object Detection + Zero-Shot Verification) to achieve near-zero false positives.
+Sentinel AI is a high-performance, multi-layered threat intelligence system designed for real-time video surveillance. Moving beyond standard bounding-box detection, this project implements a multi-stage pipeline (Skeleton Tracking + Object Detection + Zero-Shot Verification) to significantly reduce false positive alerts.
 
-## 🚀 The Enterprise Architecture
+## 🚀 System Architecture
 
-Our pipeline is heavily optimized for edge deployment (specifically tested on RTX 4050 6GB).
+The pipeline is optimized for edge deployment (tested on RTX 4050 6GB) and operates in three distinct layers:
 
-### 1. Dual-Model Tracking System (Layer 1)
-*   **YOLO11x-Pose (Skeleton Tracking):** Instead of relying on generic shapes, humans are detected and tracked using 17 specific body keypoints. This entirely eliminates false positives where objects (like chairs or bags) are misclassified as people.
-*   **YOLO11x (Object Detection):** Runs in parallel to detect critical threats like weapons (knives/guns), vehicles, and hazards (fire/smoke).
-*   **ByteTrack:** Advanced object tracking maintains consistent IDs across frames.
+### 1. Dual-Model Tracking System (Primary Detection)
+*   **YOLO11x-Pose (Skeleton Tracking):** Instead of relying on generic shapes, humans are detected and tracked using 17 specific body keypoints. This minimizes false positives where background objects are misclassified as people.
+*   **YOLO11x (Object Detection):** Runs in parallel to detect potential threats such as weapons (knives/guns), vehicles, and hazards (fire/smoke).
+*   **ByteTrack:** Advanced object tracking maintains consistent entity IDs across continuous frames.
 
-### 2. Zero-Shot Verification Pipeline (Layer 2)
-*   **OpenAI CLIP (Vision Transformer):** When YOLO detects a potential critical threat (e.g., a weapon), the region of interest (ROI) is cropped and passed to a ViT-B/32 CLIP model. 
-*   **Cross-Examination:** CLIP acts as a secondary verifier, checking against precise textual prompts ("a deadly knife" vs "a smartphone" vs "a pen"). If CLIP rejects the threat, the alert is silently dropped, eliminating false alarms.
+### 2. Zero-Shot Verification Pipeline (Secondary Filter)
+*   **OpenAI CLIP (Vision Transformer):** When YOLO detects a potential critical threat (e.g., a weapon), the specific region of interest (ROI) is cropped and passed to a ViT-B/32 CLIP model. 
+*   **Cross-Examination:** CLIP acts as a secondary verifier by matching the visual crop against precise textual prompts ("a deadly knife" vs "a smartphone" vs "a pen"). If CLIP rejects the threat, the alert is discarded, effectively handling edge cases.
 
-### 3. Threat Intelligence Engine & Temporal Smoothing (Layer 3)
-*   **Temporal Buffer:** A 5-frame rolling buffer ensures alerts are only triggered if a threat is consistently detected for ~0.3 seconds.
-*   **Pose-Based Fall Detection:** Fall detection relies on strict spatial geometry (e.g., checking if *both* ankles are visible with >50% confidence and located on the same horizontal plane as the shoulders).
+### 3. Threat Intelligence Engine (Temporal Analysis)
+*   **Temporal Buffer:** A 5-frame rolling buffer ensures alerts are only triggered if a threat is consistently detected over consecutive frames, ignoring single-frame glitches.
+*   **Pose-Based Fall Detection:** Fall detection relies on strict spatial geometry (checking if both ankles are visible, confident, and located on the same horizontal plane as the shoulders).
 *   **Dynamic Alerting:** Alerts are classified into INFO, WARNING, and CRITICAL based on severity, crowd density, and proximity breaches.
 
 ---
 
 ## 💻 Tech Stack
-*   **Core ML:** PyTorch, Ultralytics (YOLO11), HuggingFace Transformers (CLIP).
-*   **Computer Vision:** OpenCV, ByteTrack.
-*   **Hardware Acceleration:** CUDA, NVIDIA TensorRT.
-*   **Backend & Dashboard:** Flask, Flask-SocketIO (WebSockets), JavaScript, Chart.js.
+*   **Core ML:** PyTorch, Ultralytics (YOLO11), HuggingFace Transformers (CLIP)
+*   **Computer Vision:** OpenCV, ByteTrack
+*   **Hardware Acceleration:** CUDA, NVIDIA TensorRT
+*   **Backend & Dashboard:** Flask, Flask-SocketIO (WebSockets), JavaScript, Chart.js
 
 ---
 
 ## ⚙️ Hardware Acceleration (TensorRT)
-For maximum frames per second (FPS), the models can be compiled from `.pt` to NVIDIA TensorRT `.engine` formats. 
-*Note: `.engine` files are highly hardware-specific and are not included in this repository. They must be compiled on the host machine.*
+To achieve maximum frames per second (FPS), the models can be compiled from `.pt` to NVIDIA TensorRT `.engine` formats. 
+*Note: `.engine` files are highly hardware-specific and must be compiled directly on the host machine.*
 
 ---
 
