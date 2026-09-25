@@ -27,6 +27,22 @@ try:
 except Exception as e:
     log.warning(f"YOLO not available: {e}")
 
+# ── Zero-Shot Verification (CLIP) ─────────────────────────────────────────────
+CLIP_AVAILABLE = False
+_clip_model = None
+_clip_processor = None
+try:
+    from transformers import CLIPProcessor, CLIPModel
+    from PIL import Image
+    import torch
+    # ViT-B/32 is very fast and highly accurate for zero-shot image classification
+    _clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to("cuda")
+    _clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+    CLIP_AVAILABLE = True
+    log.info("OpenAI CLIP (ViT-B/32) Verification Engine loaded on GPU ✅")
+except Exception as e:
+    log.warning(f"CLIP Verification Engine not available: {e}")
+
 # ── Threat Intelligence Engine (v2 — Temporal Smoothing) ─────────────────────
 class ThreatEngine:
     WEAPON_CLASSES  = {"knife", "scissors"}          # Only real COCO weapon classes
@@ -54,9 +70,47 @@ class ThreatEngine:
     def __init__(self):
         # Circular buffer tracking how many of last N frames had each threat tag
         self._buffers = defaultdict(lambda: deque(maxlen=self.SMOOTHING_FRAMES))
+        # Verification cache for CLIP: track_id -> is_threat (bool)
+        self.verifications = {}
 
     def _proximity_ratio(self, x1, y1, x2, y2, W, H) -> float:
         return ((x2 - x1) * (y2 - y1)) / max(W * H, 1)
+
+    def _verify_threat(self, frame_bgr, bbox, category) -> bool:
+        """Uses OpenAI CLIP to verify the cropped region zero-shot."""
+        if not CLIP_AVAILABLE:
+            return True # fallback to YOLO if CLIP fails
+            
+        x1, y1, x2, y2 = map(int, bbox)
+        crop = frame_bgr[max(0,y1):y2, max(0,x1):x2]
+        if crop.size == 0: return False
+        
+        # Convert BGR to RGB for PIL
+        crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(crop_rgb)
+
+        if category == "weapon":
+            # Very precise labels to force the model to differentiate
+            labels = ["a photo of a deadly knife weapon", "a photo of a gun or pistol", 
+                      "a photo of a smartphone", "a photo of a pen or pencil", 
+                      "a photo of keys", "a photo of a hand", "a photo of a person"]
+            threat_labels = {"a photo of a deadly knife weapon", "a photo of a gun or pistol"}
+        elif category == "hazard":
+            labels = ["a photo of dangerous fire and flames", "a photo of thick smoke", 
+                      "a photo of a bright light or reflection", "a photo of fog or clouds"]
+            threat_labels = {"a photo of dangerous fire and flames", "a photo of thick smoke"}
+        else:
+            return True
+            
+        import torch
+        with torch.no_grad():
+            inputs = _clip_processor(text=labels, images=pil_img, return_tensors="pt", padding=True).to("cuda")
+            outputs = _clip_model(**inputs)
+            probs = outputs.logits_per_image.softmax(dim=1)[0]
+            best_idx = probs.argmax().item()
+            best_label = labels[best_idx]
+            
+        return best_label in threat_labels
 
     def _smooth(self, tag: str, detected: bool) -> bool:
         """Push detection result into rolling buffer. Return True only if
@@ -65,7 +119,7 @@ class ThreatEngine:
         buf = self._buffers[tag]
         return len(buf) == self.SMOOTHING_FRAMES and sum(buf) == self.SMOOTHING_FRAMES
 
-    def analyse(self, results, frame_shape, pose_results=None) -> dict:
+    def analyse(self, results, frame_shape, pose_results=None, frame_bgr=None) -> dict:
         H, W = frame_shape[:2]
         now = time.time()
         persons, weapons, hazards, vehicles, other = [], [], [], [], []
@@ -145,6 +199,22 @@ class ThreatEngine:
                 track_id = int(box.id[0]) if box.id is not None else None
                 obj = dict(cls=cls_name, conf=round(conf, 2), prox=round(prox, 3),
                            bbox=[x1, y1, x2, y2], track_id=track_id)
+
+                # ── Zero-Shot Verification for Critical Threats ───────────────────
+                if track_id is not None and (cls_name in self.WEAPON_CLASSES or cls_name in self.HAZARD_CLASSES):
+                    cat = "weapon" if cls_name in self.WEAPON_CLASSES else "hazard"
+                    if track_id not in self.verifications and frame_bgr is not None:
+                        is_threat = self._verify_threat(frame_bgr, [x1, y1, x2, y2], cat)
+                        self.verifications[track_id] = is_threat
+                        
+                    # If verified as FALSE (e.g. it's a phone, not a knife), ignore it
+                    if track_id in self.verifications and not self.verifications[track_id]:
+                        continue
+                elif frame_bgr is not None and track_id is None and (cls_name in self.WEAPON_CLASSES or cls_name in self.HAZARD_CLASSES):
+                    # No track_id, verify every frame (fallback)
+                    cat = "weapon" if cls_name in self.WEAPON_CLASSES else "hazard"
+                    if not self._verify_threat(frame_bgr, [x1, y1, x2, y2], cat):
+                        continue
 
                 if cls_name in self.WEAPON_CLASSES:    weapons.append(obj)
                 elif cls_name in self.HAZARD_CLASSES:  hazards.append(obj)
@@ -347,7 +417,8 @@ class CameraStream:
                 except: pass
 
             threat = _threat_engine.analyse(results or [], frame.shape,
-                                            pose_results=pose_results)
+                                            pose_results=pose_results,
+                                            frame_bgr=frame)
             annotated = _draw(frame.copy(), results, threat, self.cam_id, fps,
                               pose_results=pose_results)
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
