@@ -20,10 +20,12 @@ try:
     from ultralytics import YOLO
     # Pose model: detects 17 human skeleton keypoints — much more accurate for person detection
     _pose_model  = YOLO("yolo11x-pose.pt")
-    # Detection model: for everything else (weapons, vehicles, hazards)
-    _yolo_model  = YOLO("yolo11x.pt")
+    # Custom Detection model: specifically fine-tuned on CCTV Weapon dataset!
+    import os
+    custom_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "runs", "detect", "sentinel_ai", "weapon_model_v1", "weights", "best.pt"))
+    _yolo_model  = YOLO(custom_model_path)
     YOLO_AVAILABLE = True
-    log.info("YOLO11x + YOLO11x-Pose dual model loaded ✅")
+    log.info("Sentinel Custom Weapon Model + YOLO11x-Pose loaded ✅")
 except Exception as e:
     log.warning(f"YOLO not available: {e}")
 
@@ -45,7 +47,7 @@ except Exception as e:
 
 # ── Threat Intelligence Engine (v2 — Temporal Smoothing) ─────────────────────
 class ThreatEngine:
-    WEAPON_CLASSES  = {"knife", "scissors"}          # Only real COCO weapon classes
+    WEAPON_CLASSES  = {"knife", "scissors", "weapon"} # Added custom model's "weapon" class
     HAZARD_CLASSES  = {"fire", "smoke"}
     VEHICLE_CLASSES = {"car", "truck", "motorcycle", "bus"}
     PERSON_CLASS    = "person"
