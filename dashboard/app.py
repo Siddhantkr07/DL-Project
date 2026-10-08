@@ -5,7 +5,6 @@ Real webcam + IP Camera support + Threat Intelligence Engine
 
 from flask import Flask, render_template, request, jsonify, Response
 from flask_socketio import SocketIO
-from api.routes import api
 import threading, time, random, uuid, logging, cv2, numpy as np
 from collections import deque, defaultdict
 
@@ -566,7 +565,6 @@ def _emitter_thread():
 # ── Flask app ──────────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "sentinel-ai-secret!"
-app.register_blueprint(api, url_prefix="/api")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 @app.route("/")
