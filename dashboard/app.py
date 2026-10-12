@@ -104,6 +104,97 @@ try:
 except Exception as e:
     log.warning(f"CLIP not available: {e}")
 
+# ── Cross-Camera Re-Identification & Movement Tracker (MCMT) ────────────────
+class CrossCameraTracker:
+    """Tracks targets across multiple cameras using normalized 512-D Vision Transformer embeddings."""
+    def __init__(self, similarity_threshold=0.72, memory_seconds=180):
+        self.similarity_threshold = similarity_threshold
+        self.memory_seconds = memory_seconds
+        # global_id -> {"cls": str, "embedding": np.ndarray, "last_seen": float, "current_cam": str, "history": list}
+        self.entities = {}
+        self.next_id = 1
+        self.lock = threading.Lock()
+        self.transitions = deque(maxlen=30)  # recent cross-camera transition events
+
+    def match_or_register(self, crop_bgr, cls_name, cam_id):
+        if not CLIP_AVAILABLE or crop_bgr is None or crop_bgr.size == 0:
+            return None, None
+        
+        now = time.time()
+        try:
+            h, w = crop_bgr.shape[:2]
+            if h < 35 or w < 35:
+                return None, None
+            pil_img = Image.fromarray(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB))
+            inputs = _clip_processor(images=pil_img, return_tensors="pt").to(DEVICE)
+            if YOLO_HALF:
+                inputs["pixel_values"] = inputs["pixel_values"].half()
+            with torch.inference_mode():
+                feat = _clip_model.get_image_features(**inputs)
+                feat = feat / feat.norm(dim=-1, keepdim=True)
+                emb = feat[0].cpu().numpy()
+        except Exception:
+            return None, None
+
+        with self.lock:
+            # 1. Purge stale tracks older than memory_seconds
+            stale = [k for k, v in self.entities.items() if now - v["last_seen"] > self.memory_seconds]
+            for k in stale:
+                del self.entities[k]
+
+            best_gid = None
+            best_sim = -1.0
+
+            # 2. Check cosine similarity against active entities of same category
+            for gid, ent in self.entities.items():
+                if ent["cls"] != cls_name:
+                    continue
+                sim = float(np.dot(emb, ent["embedding"]))
+                if sim > best_sim:
+                    best_sim = sim
+                    best_gid = gid
+
+            trans_event = None
+            if best_gid is not None and best_sim >= self.similarity_threshold:
+                # Match confirmed!
+                ent = self.entities[best_gid]
+                prev_cam = ent["current_cam"]
+                
+                # Update visual representation using running average
+                ent["embedding"] = 0.75 * ent["embedding"] + 0.25 * emb
+                ent["embedding"] /= np.linalg.norm(ent["embedding"])
+                ent["last_seen"] = now
+
+                # Did the target move to a different camera?
+                if prev_cam != cam_id:
+                    ent["current_cam"] = cam_id
+                    ent["history"].append({"cam": cam_id, "ts": now})
+                    trans_event = {
+                        "global_id": best_gid,
+                        "cls": cls_name,
+                        "from_cam": prev_cam,
+                        "to_cam": cam_id,
+                        "timestamp": now,
+                        "similarity": round(best_sim, 2)
+                    }
+                    self.transitions.appendleft(trans_event)
+                    log.info(f"🔄 Cross-Camera Movement: {cls_name.upper()} [{best_gid}] moved from {prev_cam} ➔ {cam_id} (Similarity: {best_sim:.0%})")
+                return best_gid, trans_event
+            else:
+                # New global entity
+                new_gid = f"TARGET-{self.next_id:02d}"
+                self.next_id += 1
+                self.entities[new_gid] = {
+                    "cls": cls_name,
+                    "embedding": emb,
+                    "last_seen": now,
+                    "current_cam": cam_id,
+                    "history": [{"cam": cam_id, "ts": now}]
+                }
+                return new_gid, None
+
+_cross_cam_tracker = CrossCameraTracker()
+
 # ── Threat Intelligence Engine (v2 — Temporal Smoothing) ─────────────────────
 class ThreatEngine:
     # 22+ Active Security Target Classes across Weapons, Hazards, Vehicles, Bags, Devices, Animals:
@@ -139,6 +230,8 @@ class ThreatEngine:
         self._buffers = defaultdict(lambda: deque(maxlen=self.SMOOTHING_FRAMES))
         # Verification cache for CLIP: track_id -> is_threat (bool)
         self.verifications = {}
+        # Re-ID Cache: (cam_id, track_id) -> {"gid": str, "ts": float, "trans": dict}
+        self._reid_cache = {}
 
     def _proximity_ratio(self, x1, y1, x2, y2, W, H) -> float:
         return ((x2 - x1) * (y2 - y1)) / max(W * H, 1)
@@ -191,7 +284,7 @@ class ThreatEngine:
         # Allow flicker: as long as it's detected REQUIRED_DETECTIONS times in the window
         return sum(buf) >= self.REQUIRED_DETECTIONS
 
-    def analyse(self, results, frame_shape, pose_results=None, frame_bgr=None, threat_results=None) -> dict:
+    def analyse(self, results, frame_shape, pose_results=None, frame_bgr=None, threat_results=None, cam_id="CAM-01") -> dict:
         H, W = frame_shape[:2]
         now = time.time()
         persons, weapons, hazards, vehicles, bags, devices, animals, other = [], [], [], [], [], [], [], []
@@ -209,8 +302,23 @@ class ThreatEngine:
 
                 prox = self._proximity_ratio(x1, y1, x2, y2, W, H)
                 track_id = int(box.id[0]) if box.id is not None else None
+
+                # ── Cross-Camera Re-ID (MCMT Tracking) ────────────────────────
+                gid, trans = None, None
+                if frame_bgr is not None and track_id is not None:
+                    cache_key = (cam_id, track_id)
+                    cached = self._reid_cache.get(cache_key)
+                    if not cached or (now - cached["ts"] > 3.0):
+                        crop = frame_bgr[max(0, y1):y2, max(0, x1):x2]
+                        g_id, t_ev = _cross_cam_tracker.match_or_register(crop, "person", cam_id)
+                        if g_id:
+                            self._reid_cache[cache_key] = {"gid": g_id, "ts": now, "trans": t_ev}
+                    if cache_key in self._reid_cache:
+                        gid = self._reid_cache[cache_key]["gid"]
+                        trans = self._reid_cache[cache_key].get("trans")
+
                 obj = dict(cls="person", conf=round(conf, 2), prox=round(prox, 3),
-                           bbox=[x1, y1, x2, y2], track_id=track_id)
+                           bbox=[x1, y1, x2, y2], track_id=track_id, global_id=gid, transition=trans)
 
                 # ── Pose-based Fall Detection ─────────────────────────────────
                 fallen = False
@@ -274,8 +382,23 @@ class ThreatEngine:
             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
             prox = self._proximity_ratio(x1, y1, x2, y2, W, H)
             track_id = int(box.id[0]) if box.id is not None else None
+
+            # ── Cross-Camera Re-ID for Weapons / Bags ─────────────────────────
+            gid, trans = None, None
+            if (cls_name in self.WEAPON_CLASSES or cls_name in self.SUSPICIOUS_BAGS) and frame_bgr is not None and track_id is not None:
+                cache_key = (cam_id, track_id)
+                cached = self._reid_cache.get(cache_key)
+                if not cached or (now - cached["ts"] > 3.0):
+                    crop = frame_bgr[max(0, y1):y2, max(0, x1):x2]
+                    g_id, t_ev = _cross_cam_tracker.match_or_register(crop, cls_name, cam_id)
+                    if g_id:
+                        self._reid_cache[cache_key] = {"gid": g_id, "ts": now, "trans": t_ev}
+                if cache_key in self._reid_cache:
+                    gid = self._reid_cache[cache_key]["gid"]
+                    trans = self._reid_cache[cache_key].get("trans")
+
             obj = dict(cls=cls_name, conf=round(conf, 2), prox=round(prox, 3),
-                       bbox=[x1, y1, x2, y2], track_id=track_id)
+                       bbox=[x1, y1, x2, y2], track_id=track_id, global_id=gid, transition=trans)
 
             # ── Zero-Shot Verification for Critical Threats ───────────────────
             if track_id is not None and (cls_name in self.WEAPON_CLASSES or cls_name in self.HAZARD_CLASSES):
@@ -312,6 +435,15 @@ class ThreatEngine:
                                 len([p for p in persons if p["prox"] > 0.65]) > 0)
 
         level, reasons, tags = "SAFE", [], []
+
+        # ── Cross-Camera Movement Alerts ──────────────────────────────────────
+        for ent_obj in (persons + weapons + bags):
+            if ent_obj.get("transition"):
+                tr = ent_obj["transition"]
+                reasons.append(f"CROSS-CAMERA TRACK: {tr['cls'].upper()} [{tr['global_id']}] transitioned from {tr['from_cam']} ➔ {tr['to_cam']}")
+                tags.append("reid")
+                if self.LEVEL_RANK[level] < self.LEVEL_RANK["WARNING"]: level = "WARNING"
+                break
 
         if fallen_confirmed:
             level = "CRITICAL"
@@ -420,12 +552,32 @@ def _draw(frame, results, threat_results, threat, cam_id, fps, pose_results=None
             if conf < 0.60: continue
             x1,y1,x2,y2 = map(int, box.xyxy[0].tolist())
             track_label = f" #{int(box.id[0])}" if box.id is not None else ""
+            
+            # Cross-camera Re-ID label & movement badge
+            gid_label = ""
+            bid = int(box.id[0]) if box.id is not None else None
+            trans_info = None
+            for o in threat.get("objects", []):
+                if o.get("track_id") == bid and o.get("cls") == "person":
+                    if o.get("global_id"):
+                        gid_label = f" [{o['global_id']}]"
+                    if o.get("transition"):
+                        trans_info = o["transition"]
+                    break
+
             color = (0, 230, 120)  # green for person
             cv2.rectangle(frame, (x1,y1), (x2,y2), color, 2)
-            lbl = f"person{track_label} {conf:.0%}"
+            lbl = f"person{gid_label}{track_label} {conf:.0%}"
             (tw,th),_ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
             cv2.rectangle(frame, (x1, y1-th-6), (x1+tw+4, y1), color, -1)
             cv2.putText(frame, lbl, (x1+2, y1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0,0,0), 1)
+
+            if trans_info:
+                badge = f">> MOVED: {trans_info['from_cam']} -> {trans_info['to_cam']}"
+                (bw_t, bh_t), _ = cv2.getTextSize(badge, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
+                cv2.rectangle(frame, (x1, max(0, y1-th-bh_t-14)), (x1+bw_t+8, max(0, y1-th-6)), (0, 212, 255), -1)
+                cv2.putText(frame, badge, (x1+4, max(0, y1-th-9)), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 0, 0), 1)
+
             # Draw skeleton keypoints
             try:
                 kpts = pose_results[0].keypoints.xy[i]
@@ -458,8 +610,17 @@ def _draw(frame, results, threat_results, threat, cam_id, fps, pose_results=None
         x1,y1,x2,y2 = map(int, box.xyxy[0].tolist())
         color = CLS_COLORS.get(cls_name, CLS_COLORS["default"])
         track_label = f" #{int(box.id[0])}" if box.id is not None else ""
+        
+        gid_label = ""
+        bid = int(box.id[0]) if box.id is not None else None
+        for o in threat.get("objects", []):
+            if o.get("track_id") == bid and o.get("cls") == cls_name:
+                if o.get("global_id"):
+                    gid_label = f" [{o['global_id']}]"
+                break
+
         cv2.rectangle(frame, (x1,y1), (x2,y2), color, 2)
-        lbl = f"{cls_name}{track_label} {conf:.0%}"
+        lbl = f"{cls_name}{gid_label}{track_label} {conf:.0%}"
         (tw,th),_ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
         cv2.rectangle(frame, (x1, y1-th-6), (x1+tw+4, y1), color, -1)
         cv2.putText(frame, lbl, (x1+2, y1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0,0,0), 1)
@@ -606,7 +767,8 @@ class CameraStream:
 
             threat = _threat_engine.analyse(results or [], frame.shape,
                                             pose_results=pose_results,
-                                            frame_bgr=frame, threat_results=threat_results)
+                                            frame_bgr=frame, threat_results=threat_results,
+                                            cam_id=self.cam_id)
             annotated = _draw(frame.copy(), results, threat_results, threat, self.cam_id, fps,
                               pose_results=pose_results)
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -730,6 +892,25 @@ def _emitter_thread():
             "detection_totals": dict(detection_log),
         })
 
+        # Multi-Camera Re-ID Target Tracking Update
+        with _cross_cam_tracker.lock:
+            active_targets = [
+                {
+                    "global_id": gid,
+                    "cls": ent["cls"],
+                    "current_cam": ent["current_cam"],
+                    "last_seen": ent["last_seen"],
+                    "history": list(ent["history"])
+                }
+                for gid, ent in list(_cross_cam_tracker.entities.items())
+            ]
+            trans_list = list(_cross_cam_tracker.transitions)[:10]
+
+        socketio.emit("reid_update", {
+            "transitions": trans_list,
+            "active_targets": active_targets
+        })
+
         emit_alert = (global_level != prev_global_level) or (global_level in ("CRITICAL","WARNING"))
         if emit_alert and global_level != "SAFE":
             alert = {
@@ -769,6 +950,23 @@ def get_threat():
 @app.route("/api/alerts")
 def get_alerts():
     return jsonify(alerts[:50])
+
+@app.route("/api/reid")
+def get_reid():
+    with _cross_cam_tracker.lock:
+        return jsonify({
+            "transitions": list(_cross_cam_tracker.transitions),
+            "active_targets": [
+                {
+                    "global_id": gid,
+                    "cls": ent["cls"],
+                    "current_cam": ent["current_cam"],
+                    "last_seen": ent["last_seen"],
+                    "history": list(ent["history"])
+                }
+                for gid, ent in list(_cross_cam_tracker.entities.items())
+            ]
+        })
 
 @app.route("/api/stats")
 def get_stats():

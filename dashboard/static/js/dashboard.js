@@ -168,7 +168,65 @@ socket.on('connect',    () => console.log('%c🛡️ Sentinel AI connected','col
 socket.on('disconnect', () => console.warn('⚠️ Disconnected'));
 socket.on('threat_update', d => updateThreat(d.level, d.color, d.reasons, d.counts, d.fps, d.timeline, d.detection_totals));
 socket.on('camera_update', d => updateCameras(d.cameras, d.stats));
+socket.on('reid_update',   d => updateReID(d.transitions, d.active_targets));
 socket.on('alert',        a => addAlert(a));
+
+/* ─── CROSS-CAMERA RE-ID (MCMT) ──────────────────────────────────── */
+function updateReID(transitions, targets) {
+  const ct = $('reid-active-ct');
+  if (ct) ct.innerHTML = `<i class="fa-solid fa-fingerprint"></i> ${targets?.length||0} Active Target${(targets?.length||0)===1?'':'s'}`;
+
+  const feed = $('reid-feed');
+  if (!feed) return;
+
+  if (!transitions || transitions.length === 0) {
+    if (targets && targets.length > 0) {
+      feed.innerHTML = targets.map(t => {
+        const hist = t.history.map(h => `<span class="s-badge s-badge-info" style="font-size:10px;padding:2px 7px;">${escHtml(h.cam)}</span>`).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px;color:var(--tx-3)"></i> ');
+        return `
+          <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:8px 12px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="background:var(--brand);color:#fff;font-weight:700;font-size:11px;padding:3px 8px;border-radius:6px;font-family:monospace;"><i class="fa-solid fa-crosshairs"></i> ${escHtml(t.global_id)}</span>
+              <span style="font-size:13px;font-weight:600;color:var(--tx-1);text-transform:capitalize;">${escHtml(t.cls)}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx-2);">
+              <span style="color:var(--tx-3)">Journey:</span> ${hist}
+            </div>
+          </div>
+        `;
+      }).join('');
+    } else {
+      feed.innerHTML = `
+        <div class="empty-state" id="reid-empty" style="padding:14px;text-align:center;">
+          <i class="fa-solid fa-camera-rotate" style="font-size:22px;color:var(--tx-3);margin-bottom:6px;display:block;"></i>
+          <p style="font-size:13px;color:var(--tx-2);margin:0 0 4px 0;font-weight:500;">No cross-camera movements detected yet</p>
+          <span style="font-size:11px;color:var(--tx-3);">When you move from CAM-01 to your phone camera (CAM-02), Sentinel AI will trace your movement live</span>
+        </div>`;
+    }
+    return;
+  }
+
+  // Display transition events
+  feed.innerHTML = transitions.map(tr => {
+    const timeStr = new Date(tr.timestamp * 1000).toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const simPct = Math.round((tr.similarity||0.85)*100);
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(99,102,241,0.09);border:1px solid rgba(99,102,241,0.25);border-radius:8px;padding:9px 12px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="background:var(--brand);color:#fff;font-weight:700;font-size:11px;padding:3px 7px;border-radius:6px;font-family:monospace;">${escHtml(tr.global_id)}</span>
+          <span style="font-size:13px;font-weight:600;color:var(--tx-1);text-transform:capitalize;">${escHtml(tr.cls)}</span>
+          <span style="background:rgba(34,197,94,0.15);color:var(--safe);font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;"><i class="fa-solid fa-fingerprint"></i> ${simPct}% Match</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--tx-1);">
+          <span class="s-badge s-badge-warn" style="font-size:11px;">${escHtml(tr.from_cam)}</span>
+          <i class="fa-solid fa-arrow-right" style="color:var(--brand);font-size:11px;"></i>
+          <span class="s-badge s-badge-safe" style="font-size:11px;">${escHtml(tr.to_cam)}</span>
+          <span style="font-size:11px;color:var(--tx-3);font-family:monospace;margin-left:4px;">${timeStr}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
 
 /* ══════════════════════════════════════════════════════════════════
    THREAT / GAUGE
