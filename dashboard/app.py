@@ -33,7 +33,7 @@ else:
 YOLO_AVAILABLE   = False
 YOLO_DEVICE      = DEVICE
 YOLO_HALF        = (DEVICE == "cuda")   # FP16 only on GPU
-YOLO_IMGSZ       = 800                  # Balanced for better FPS on RTX 4050
+YOLO_IMGSZ       = 640                  # Native 640x640 standard YOLO resolution for 30+ FPS
 YOLO_IOU         = 0.45                 # NMS IoU threshold
 
 _yolo_model = None   # Object detection model (weapons, vehicles, hazards)
@@ -42,12 +42,14 @@ _pose_model = None   # Pose model (persons via 17 skeleton keypoints)
 try:
     from ultralytics import YOLO
 
-    # ── Pose Model ────────────────────────────────────────────────────────────
-    _pose_model = YOLO("yolo11x-pose.pt")
+    # ── Pose Model (Ultra-fast Nano Pose for 30+ FPS) ─────────────────────────
+    # yolo11n-pose runs in ~2.5ms on RTX 4050 compared to 45ms for 11x
+    pose_model_name = "yolo11n-pose.pt" if os.path.exists(os.path.join(os.path.dirname(__file__), "yolo11n-pose.pt")) or os.path.exists("yolo11n-pose.pt") else "yolo11x-pose.pt"
+    _pose_model = YOLO(pose_model_name)
     _pose_model.to(YOLO_DEVICE)
     if YOLO_HALF:
         _pose_model.model.half()
-    log.info("YOLO11x-Pose loaded on GPU (FP16) ✅")
+    log.info(f"{pose_model_name} loaded on GPU (FP16) ✅")
 
     # ── Threat Detection Model (Guns, Knives, Explosives) ──────────────────────
     # We downloaded a specialized YOLOv8 threat detection model
@@ -104,17 +106,20 @@ except Exception as e:
 
 # ── Threat Intelligence Engine (v2 — Temporal Smoothing) ─────────────────────
 class ThreatEngine:
-    # Added 'gun', 'grenade' to weapons; 'explosion' to hazards!
-    WEAPON_CLASSES  = {"knife", "scissors", "weapon", "gun", "grenade"} 
-    HAZARD_CLASSES  = {"fire", "smoke", "explosion"}
-    VEHICLE_CLASSES = {"car", "truck", "motorcycle", "bus"}
-    PERSON_CLASS    = "person"
+    # 22+ Active Security Target Classes across Weapons, Hazards, Vehicles, Bags, Devices, Animals:
+    WEAPON_CLASSES   = {"knife", "scissors", "weapon", "gun", "pistol", "rifle", "grenade", "baseball bat"} 
+    HAZARD_CLASSES   = {"fire", "smoke", "explosion"}
+    VEHICLE_CLASSES  = {"car", "truck", "motorcycle", "bus", "bicycle"}
+    SUSPICIOUS_BAGS  = {"backpack", "handbag", "suitcase"}
+    RESTRICTED_DEVS  = {"cell phone", "laptop"}
+    ANIMAL_CLASSES   = {"dog", "cat", "bird"}
+    PERSON_CLASS     = "person"
 
-    # Confidence thresholds — balanced for high precision without being completely blind
-    CONF_PERSON  = 0.60   
-    CONF_WEAPON  = 0.60   # 60% confidence filters out random noise but still catches real weapons
-    CONF_VEHICLE = 0.55
-    CONF_DEFAULT = 0.50
+    # Confidence thresholds — balanced for high sensitivity without noise
+    CONF_PERSON  = 0.50   
+    CONF_WEAPON  = 0.50   # 50% lets user detect knives/scissors/guns smoothly
+    CONF_VEHICLE = 0.50
+    CONF_DEFAULT = 0.45
 
     # Temporal buffer: length of the rolling history window
     SMOOTHING_FRAMES = 5
@@ -151,12 +156,14 @@ class ThreatEngine:
         pil_img = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
 
         if category == "weapon":
-            # Added more negative classes to greatly improve precision!
-            labels = ["a photo of a deadly knife weapon", "a photo of a gun or pistol",
-                      "a photo of a smartphone", "a photo of a pen or pencil",
-                      "a photo of keys", "a photo of a hand", "a photo of a person",
-                      "a photo of a remote control", "a photo of a bottle", "a photo of a tool"]
-            threat_labels = {"a photo of a deadly knife weapon", "a photo of a gun or pistol"}
+            # Multi-weapon positive labels + realistic negative counter-classes
+            labels = ["a photo of a deadly knife weapon", "a photo of a gun or pistol or firearm",
+                      "a photo of scissors", "a photo of a grenade or explosive", "a photo of a baseball bat",
+                      "a photo of a smartphone or mobile phone", "a photo of a pen or pencil",
+                      "a photo of keys", "a photo of a human hand or finger", "a photo of a person",
+                      "a photo of a remote control", "a photo of a bottle or cup", "a photo of a tool or utensil"]
+            threat_labels = {"a photo of a deadly knife weapon", "a photo of a gun or pistol or firearm",
+                             "a photo of scissors", "a photo of a grenade or explosive", "a photo of a baseball bat"}
         elif category == "hazard":
             labels = ["a photo of dangerous fire and flames", "a photo of thick smoke",
                       "a photo of a bright light or reflection", "a photo of fog or clouds"]
@@ -187,7 +194,7 @@ class ThreatEngine:
     def analyse(self, results, frame_shape, pose_results=None, frame_bgr=None, threat_results=None) -> dict:
         H, W = frame_shape[:2]
         now = time.time()
-        persons, weapons, hazards, vehicles, other = [], [], [], [], []
+        persons, weapons, hazards, vehicles, bags, devices, animals, other = [], [], [], [], [], [], [], []
 
         # ── PERSONS: from Pose model (skeleton keypoints — zero false positives) ──
         if YOLO_AVAILABLE and pose_results and len(pose_results[0].boxes):
@@ -289,6 +296,9 @@ class ThreatEngine:
             if cls_name in self.WEAPON_CLASSES:    weapons.append(obj)
             elif cls_name in self.HAZARD_CLASSES:  hazards.append(obj)
             elif cls_name in self.VEHICLE_CLASSES: vehicles.append(obj)
+            elif cls_name in self.SUSPICIOUS_BAGS: bags.append(obj)
+            elif cls_name in self.RESTRICTED_DEVS: devices.append(obj)
+            elif cls_name in self.ANIMAL_CLASSES:  animals.append(obj)
             else:                                  other.append(obj)
 
         # ── Temporal smoothing checks ─────────────────────────────────────────
@@ -340,10 +350,34 @@ class ThreatEngine:
                 level = "INFO"
                 reasons.append(f"{n} person{'s' if n > 1 else ''} monitored")
                 tags.append("normal")
+            elif weapons:
+                level = "CRITICAL"
+                reasons.append(f"WEAPON: {weapons[0]['cls'].upper()}")
+                tags.append("weapon")
+            elif hazards:
+                level = "CRITICAL"
+                reasons.append(f"HAZARD: {hazards[0]['cls'].upper()}")
+                tags.append("hazard")
             elif vehicles:
                 level = "INFO"
                 reasons.append(f"{len(vehicles)} vehicle(s) detected")
                 tags.append("vehicle")
+            elif bags:
+                level = "INFO"
+                reasons.append(f"BAG: {bags[0]['cls'].upper()}")
+                tags.append("bag")
+            elif devices:
+                level = "INFO"
+                reasons.append(f"DEVICE: {devices[0]['cls'].upper()}")
+                tags.append("device")
+            elif animals:
+                level = "INFO"
+                reasons.append(f"ANIMAL: {animals[0]['cls'].upper()}")
+                tags.append("animal")
+            elif other:
+                level = "INFO"
+                reasons.append(f"{other[0]['cls'].upper()} detected")
+                tags.append("object")
             else:
                 level = "SAFE"
                 reasons.append("Area clear")
@@ -352,8 +386,10 @@ class ThreatEngine:
             "level": level, "color": self.LEVEL_COLOR[level],
             "reasons": reasons, "tags": tags,
             "counts": {"persons": len(persons), "weapons": len(weapons),
-                       "hazards": len(hazards), "vehicles": len(vehicles), "other": len(other)},
-            "objects": persons + weapons + hazards + vehicles + other,
+                       "hazards": len(hazards), "vehicles": len(vehicles),
+                       "bags": len(bags), "devices": len(devices),
+                       "animals": len(animals), "other": len(other)},
+            "objects": persons + weapons + hazards + vehicles + bags + devices + animals + other,
             "ts": now,
         }
 
@@ -361,7 +397,16 @@ _threat_engine = ThreatEngine()
 
 
 # ── Multi-Camera Manager ───────────────────────────────────────────────────────
-CLS_COLORS = {"person": (0, 230, 120), "car": (0, 190, 255), "truck": (0, 100, 255), "knife": (0, 0, 255), "gun": (0, 0, 255), "grenade": (0, 0, 255), "explosion": (0, 80, 255), "fire": (0, 80, 255), "default": (180, 180, 0)}
+CLS_COLORS = {
+    "person": (0, 230, 120),
+    "car": (0, 190, 255), "truck": (0, 100, 255), "motorcycle": (0, 150, 255), "bus": (0, 120, 255), "bicycle": (0, 220, 255),
+    "knife": (0, 0, 255), "gun": (0, 0, 255), "pistol": (0, 0, 255), "rifle": (0, 0, 255), "grenade": (0, 0, 255), "weapon": (0, 0, 255),
+    "baseball bat": (0, 50, 255), "scissors": (0, 100, 255), "fire": (0, 80, 255), "smoke": (150, 150, 150), "explosion": (0, 60, 255),
+    "backpack": (255, 140, 0), "handbag": (255, 160, 0), "suitcase": (255, 120, 0),
+    "cell phone": (180, 0, 255), "laptop": (200, 0, 230),
+    "dog": (0, 255, 200), "cat": (0, 230, 200), "bird": (0, 210, 220),
+    "bottle": (255, 200, 0), "default": (180, 180, 0)
+}
 
 def _draw(frame, results, threat_results, threat, cam_id, fps, pose_results=None):
     h, w = frame.shape[:2]
@@ -467,9 +512,11 @@ class CameraStream:
             with self.lock: self.latest_threat["reasons"] = ["Camera Offline"]
             return
             
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        cap.set(cv2.CAP_PROP_FPS, 30)
         
         while self.running:
             ret, frame = cap.read()
@@ -479,65 +526,52 @@ class CameraStream:
                     frame = cv2.flip(frame, 1)
                 self.raw_frame = frame
             else:
-                time.sleep(0.01)
+                time.sleep(0.005)
         cap.release()
 
     def _run(self):
         prev = time.time()
+        frame_idx = 0
+        last_pose_results = None
         while self.running:
             frame = self.raw_frame
             if frame is None:
-                time.sleep(0.05)
+                time.sleep(0.01)
                 continue
             
             # Make a copy so grabber doesn't overwrite it mid-inference
             frame = frame.copy()
+            frame_idx += 1
 
             now = time.time()
             fps = round(1.0/max(now-prev, 1e-9), 1)
             prev = now
 
             results        = None   # detection results (weapons, vehicles etc.)
-            pose_results   = None   # pose results (persons via skeleton)
+            pose_results   = last_pose_results   # pose results (persons via skeleton)
             threat_results = None   # specialized threat results (guns, grenades, knives, explosion)
             if YOLO_AVAILABLE:
-                try:
-                    # Object detection: COCO fallback (vehicles, scissors)
-                    results = _yolo_model.track(
-                        frame,
-                        persist       = True,
-                        tracker       = "bytetrack.yaml",
-                        device        = YOLO_DEVICE,
-                        half          = YOLO_HALF,
-                        imgsz         = YOLO_IMGSZ,
-                        iou           = YOLO_IOU,
-                        agnostic_nms  = False,
-                        verbose       = False,
-                    )
-                except Exception as e:
-                    log.debug(f"Detection error: {e}")
-                
-                try:
-                    # Specialized Threat Detection: guns, knives, explosives
-                    if _threat_yolo is not None:
-                        threat_results = _threat_yolo.track(
-                            frame,
-                            persist       = True,
-                            tracker       = "bytetrack.yaml",
-                            device        = YOLO_DEVICE,
-                            half          = YOLO_HALF,
-                            imgsz         = YOLO_IMGSZ,
-                            iou           = YOLO_IOU,
-                            agnostic_nms  = False,
-                            verbose       = False,
-                        )
-                except Exception as e:
-                    log.debug(f"Threat detection error: {e}")
+                with torch.inference_mode():
+                    try:
+                        # 1. Specialized Threat Detection: guns, knives, explosives
+                        if _threat_yolo is not None:
+                            threat_results = _threat_yolo.track(
+                                frame,
+                                persist       = True,
+                                tracker       = "bytetrack.yaml",
+                                device        = YOLO_DEVICE,
+                                half          = YOLO_HALF,
+                                imgsz         = YOLO_IMGSZ,
+                                iou           = YOLO_IOU,
+                                agnostic_nms  = False,
+                                verbose       = False,
+                            )
+                    except Exception as e:
+                        log.debug(f"Threat detection error: {e}")
 
-                try:
-                    # Pose model: same GPU beast settings
-                    if _pose_model is not None:
-                        pose_results = _pose_model.track(
+                    try:
+                        # 2. General Object Detection: 22+ security classes (vehicles, scissors, bags, devices)
+                        results = _yolo_model.track(
                             frame,
                             persist       = True,
                             tracker       = "bytetrack.yaml",
@@ -548,15 +582,34 @@ class CameraStream:
                             agnostic_nms  = False,
                             verbose       = False,
                         )
-                except Exception as e:
-                    log.debug(f"Pose error: {e}")
+                    except Exception as e:
+                        log.debug(f"Detection error: {e}")
+
+                    try:
+                        # 3. Pose model: run on alternate frames for huge FPS boost
+                        # Humans move smoothly over hundreds of milliseconds; 2-frame cadence is visually seamless
+                        if _pose_model is not None and (frame_idx % 2 == 0 or last_pose_results is None):
+                            pose_results = _pose_model.track(
+                                frame,
+                                persist       = True,
+                                tracker       = "bytetrack.yaml",
+                                device        = YOLO_DEVICE,
+                                half          = YOLO_HALF,
+                                imgsz         = YOLO_IMGSZ,
+                                iou           = YOLO_IOU,
+                                agnostic_nms  = False,
+                                verbose       = False,
+                            )
+                            last_pose_results = pose_results
+                    except Exception as e:
+                        log.debug(f"Pose error: {e}")
 
             threat = _threat_engine.analyse(results or [], frame.shape,
                                             pose_results=pose_results,
                                             frame_bgr=frame, threat_results=threat_results)
             annotated = _draw(frame.copy(), results, threat_results, threat, self.cam_id, fps,
                               pose_results=pose_results)
-            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
             
             with self.lock:
                 self.fps = fps

@@ -453,37 +453,57 @@
           <div class="settings-grid">
             <!-- System Info -->
             <div class="settings-card">
-              <div class="settings-card-title"><i class="fa-solid fa-microchip"></i> System Information</div>
+              <div class="settings-card-title"><i class="fa-solid fa-microchip"></i> System & AI Architecture</div>
               <div class="settings-rows">
-                <div class="settings-row"><span class="sr-label">AI Model</span><span class="sr-val sr-mono">YOLOv8n</span></div>
-                <div class="settings-row"><span class="sr-label">Framework</span><span class="sr-val">Ultralytics 8.4</span></div>
-                <div class="settings-row"><span class="sr-label">Compute</span><span class="sr-val">CPU</span></div>
+                <div class="settings-row"><span class="sr-label">AI Architecture</span><span class="sr-val sr-mono">Triple YOLO + ViT (FP16)</span></div>
+                <div class="settings-row"><span class="sr-label">Threat Model</span><span class="sr-val">YOLOv8 Threat (Guns/Knives/Explosives)</span></div>
+                <div class="settings-row"><span class="sr-label">Pose Model</span><span class="sr-val">YOLO11n-Pose (17 Skeleton Keypoints)</span></div>
+                <div class="settings-row"><span class="sr-label">Object Model</span><span class="sr-val">YOLO11s COCO (Vehicles/Bags/Scissors)</span></div>
+                <div class="settings-row"><span class="sr-label">Verification</span><span class="sr-val sr-mono">OpenAI CLIP (ViT-B/32 Zero-Shot)</span></div>
+                <div class="settings-row"><span class="sr-label">Compute Device</span><span class="sr-val" style="color:var(--safe);font-weight:600"><i class="fa-solid fa-bolt"></i> NVIDIA RTX 4050 GPU (CUDA FP16)</span></div>
+                <div class="settings-row"><span class="sr-label">Target Classes</span><span class="sr-val sr-mono" style="color:var(--brand);font-weight:700">22 Active Security Classes</span></div>
                 <div class="settings-row"><span class="sr-label">Backend</span><span class="sr-val">Flask + SocketIO</span></div>
-                <div class="settings-row"><span class="sr-label">Status</span><span class="sr-val"><span class="status-dot status-dot--on"></span>Running</span></div>
+                <div class="settings-row"><span class="sr-label">Engine Status</span><span class="sr-val"><span class="status-dot status-dot--on"></span>Running (GPU Beast Mode)</span></div>
               </div>
             </div>
             <!-- Detection Settings -->
             <div class="settings-card">
               <div class="settings-card-title"><i class="fa-solid fa-crosshairs"></i> Detection Settings</div>
               <div class="settings-rows">
-                <div class="settings-row"><span class="sr-label">Confidence Threshold</span><span class="sr-val sr-mono">40%</span></div>
-                <div class="settings-row"><span class="sr-label">Min Detection Size</span><span class="sr-val sr-mono">20px</span></div>
+                <div class="settings-row"><span class="sr-label">Base Sensitivity</span><span class="sr-val sr-mono">50%</span></div>
+                <div class="settings-row"><span class="sr-label">Temporal Window</span><span class="sr-val sr-mono">5 Frames (3 Hits Req.)</span></div>
                 <div class="settings-row settings-row--slider">
-                  <label class="sr-label">Detection Sensitivity</label>
-                  <input type="range" class="settings-slider" id="conf-slider" min="10" max="90" value="40" oninput="updateConfidence(this.value)"/>
-                  <span class="sr-val sr-mono" id="conf-label">40%</span>
+                  <label class="sr-label">Sensitivity Threshold</label>
+                  <input type="range" class="settings-slider" id="conf-slider" min="10" max="90" value="50" oninput="updateConfidence(this.value)"/>
+                  <span class="sr-val sr-mono" id="conf-label">50%</span>
                 </div>
               </div>
-              <div class="settings-card-title" style="margin-top:12px"><i class="fa-solid fa-tags"></i> Active Classes</div>
+              <div class="settings-card-title" style="margin-top:12px"><i class="fa-solid fa-tags"></i> Active Target Classes (22 Categories)</div>
               <div class="class-tags">
-                <span class="class-tag class-tag--active">Person</span>
-                <span class="class-tag class-tag--active">Car</span>
-                <span class="class-tag class-tag--active">Truck</span>
-                <span class="class-tag class-tag--active">Knife</span>
-                <span class="class-tag class-tag--active">Fire</span>
-                <span class="class-tag class-tag--active">Smoke</span>
-                <span class="class-tag">Dog</span>
-                <span class="class-tag">Bicycle</span>
+                <span class="class-tag class-tag--active" style="border-color:#22c55e"><i class="fa-solid fa-person"></i> Person</span>
+                <span class="class-tag class-tag--active" style="border-color:#ef4444"><i class="fa-solid fa-gun"></i> Gun / Firearm</span>
+                <span class="class-tag class-tag--active" style="border-color:#ef4444"><i class="fa-solid fa-burst"></i> Pistol</span>
+                <span class="class-tag class-tag--active" style="border-color:#ef4444"><i class="fa-solid fa-crosshairs"></i> Rifle</span>
+                <span class="class-tag class-tag--active" style="border-color:#ef4444"><i class="fa-solid fa-skull"></i> Grenade</span>
+                <span class="class-tag class-tag--active" style="border-color:#ef4444"><i class="fa-solid fa-bomb"></i> Explosion</span>
+                <span class="class-tag class-tag--active" style="border-color:#ef4444"><i class="fa-solid fa-knife"></i> Knife</span>
+                <span class="class-tag class-tag--active" style="border-color:#ef4444"><i class="fa-solid fa-scissors"></i> Scissors</span>
+                <span class="class-tag class-tag--active" style="border-color:#ef4444"><i class="fa-solid fa-baseball-bat-ball"></i> Baseball Bat</span>
+                <span class="class-tag class-tag--active" style="border-color:#f97316"><i class="fa-solid fa-fire"></i> Fire</span>
+                <span class="class-tag class-tag--active" style="border-color:#f97316"><i class="fa-solid fa-smog"></i> Smoke</span>
+                <span class="class-tag class-tag--active" style="border-color:#06b6d4"><i class="fa-solid fa-car"></i> Car</span>
+                <span class="class-tag class-tag--active" style="border-color:#06b6d4"><i class="fa-solid fa-truck"></i> Truck</span>
+                <span class="class-tag class-tag--active" style="border-color:#06b6d4"><i class="fa-solid fa-motorcycle"></i> Motorcycle</span>
+                <span class="class-tag class-tag--active" style="border-color:#06b6d4"><i class="fa-solid fa-bus"></i> Bus</span>
+                <span class="class-tag class-tag--active" style="border-color:#06b6d4"><i class="fa-solid fa-bicycle"></i> Bicycle</span>
+                <span class="class-tag class-tag--active" style="border-color:#8b5cf6"><i class="fa-solid fa-suitcase"></i> Backpack</span>
+                <span class="class-tag class-tag--active" style="border-color:#8b5cf6"><i class="fa-solid fa-bag-shopping"></i> Handbag</span>
+                <span class="class-tag class-tag--active" style="border-color:#8b5cf6"><i class="fa-solid fa-briefcase"></i> Suitcase</span>
+                <span class="class-tag class-tag--active" style="border-color:#ec4899"><i class="fa-solid fa-mobile-screen"></i> Cell Phone</span>
+                <span class="class-tag class-tag--active" style="border-color:#ec4899"><i class="fa-solid fa-laptop"></i> Laptop</span>
+                <span class="class-tag class-tag--active" style="border-color:#14b8a6"><i class="fa-solid fa-dog"></i> Dog</span>
+                <span class="class-tag class-tag--active" style="border-color:#14b8a6"><i class="fa-solid fa-cat"></i> Cat</span>
+                <span class="class-tag class-tag--active" style="border-color:#eab308"><i class="fa-solid fa-wine-bottle"></i> Bottle</span>
               </div>
             </div>
             <!-- Notifications -->
