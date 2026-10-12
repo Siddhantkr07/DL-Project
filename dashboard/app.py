@@ -978,7 +978,7 @@ def get_cameras():
 
 @app.route("/api/cameras/add", methods=["POST"])
 def add_camera_api():
-    data = request.json
+    data = request.json or {}
     cam_id = data.get("id")
     source = data.get("source")
     location = data.get("location", "New Camera")
@@ -987,6 +987,25 @@ def add_camera_api():
         return jsonify({"success": False, "error": "Missing id or source"}), 400
         
     start_camera(cam_id, source, location)
+    return jsonify({"success": True, "cam_id": cam_id})
+
+@app.route("/api/cameras/stop", methods=["POST"])
+def stop_camera_api():
+    data = request.json or {}
+    cam_id = data.get("id")
+    if not cam_id or cam_id == "CAM-01":
+        return jsonify({"success": False, "error": "Cannot disconnect primary camera"}), 400
+    if cam_id in cam_streams:
+        cam_streams[cam_id].stop()
+        del cam_streams[cam_id]
+    for c in cameras_info:
+        if c["id"] == cam_id:
+            c["status"] = "inactive"
+            c["live"] = False
+            c["source"] = ""
+            c["fps"] = 0.0
+            c["detections"] = 0
+            c["threat"] = "SAFE"
     return jsonify({"success": True, "cam_id": cam_id})
 
 if __name__ == "__main__":

@@ -348,8 +348,63 @@ function updateThreat(level, color, reasons, counts, fps, timeline, detTotals) {
 }
 
 function updateCameras(cameras, stats) {
-  const active = (cameras||[]).filter(c=>c.status==='active').length;
-  set('m-active', active+'/4'); set('kpi-cameras', active);
+  if (!cameras) return;
+  const active = cameras.filter(c => c.live || c.status==='active').length;
+  set('m-active', active + '/4');
+  set('kpi-cameras', active);
+
+  // Update filter pills counters
+  const pills = $$('#cam-filter-pills .filter-pill span');
+  if (pills && pills.length >= 3) {
+    pills[0].textContent = cameras.length;
+    pills[1].textContent = active;
+    pills[2].textContent = cameras.length - active;
+  }
+
+  // Sync each camera UI
+  cameras.forEach(c => {
+    const camId = c.id;
+    const isLive = c.live || c.status === 'active';
+    const fpsText = (c.fps || 0).toFixed(0) + ' FPS';
+    const detText = (c.detections || 0) + ' detections';
+    const threatLvl = c.threat || 'SAFE';
+
+    // Overview Badge
+    const ovBadge = $(`cc-badge-${camId}`);
+    if (ovBadge) {
+      if (isLive) {
+        ovBadge.className = `s-badge ${BADGE_CLS[threatLvl] || 's-badge-safe'}`;
+        ovBadge.textContent = threatLvl;
+      } else {
+        ovBadge.className = 's-badge s-badge-off';
+        ovBadge.textContent = 'OFFLINE';
+      }
+    }
+
+    // Cameras page Badge
+    const cpcBadge = $(`cpc-badge-${camId}`);
+    if (cpcBadge) {
+      if (isLive) {
+        cpcBadge.className = `s-badge ${BADGE_CLS[threatLvl] || 's-badge-safe'}`;
+        cpcBadge.textContent = threatLvl;
+      } else {
+        cpcBadge.className = 's-badge s-badge-off';
+        cpcBadge.textContent = 'INACTIVE';
+      }
+    }
+
+    // Camera page meta stats
+    if (isLive) {
+      set(`cpc-fps-${camId}`, fpsText);
+      set(`cpc-det-${camId}`, detText);
+    }
+
+    // Location
+    if (c.location) {
+      set(`loc-${camId}`, c.location);
+      set(`cpc-loc-${camId}`, c.location);
+    }
+  });
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -499,54 +554,182 @@ function dispatchTeam() {
 /* ══════════════════════════════════════════════════════════════════
    CAMERA MANAGEMENT
 ══════════════════════════════════════════════════════════════════ */
-function openAddCameraModal() {
-  const m = $('add-cam-modal'); if (m) m.setAttribute('aria-hidden','false');
+function openAddCameraModal(targetSlot) {
+  const m = $('add-cam-modal');
+  if (m) {
+    const slotEl = $('cam-slot');
+    if (slotEl) {
+      slotEl.value = targetSlot || 'auto';
+    }
+    m.setAttribute('aria-hidden','false');
+  }
 }
 function closeAddCameraModal() {
   const m = $('add-cam-modal'); if (m) m.setAttribute('aria-hidden','true');
 }
+
+function activateCameraUI(camId, name, loc) {
+  // 1. Overview cell
+  const ovCell = $(`cc-${camId}`);
+  if (ovCell) {
+    const thumb = $(`thumb-${camId}`);
+    if (thumb) {
+      thumb.className = 'cc-thumb';
+      let img = thumb.querySelector('img');
+      if (!img) {
+        img = document.createElement('img');
+        img.className = 'cc-img';
+        img.alt = camId;
+        thumb.prepend(img);
+      }
+      img.style.display = 'block';
+      img.src = `/video_feed/${camId}?t=${Date.now()}`;
+      
+      const icon = thumb.querySelector('i'); if (icon) icon.style.display = 'none';
+      let span = thumb.querySelector('span');
+      if (span) {
+        span.className = 'cc-live';
+        span.innerHTML = '<span class="live-dot"></span>LIVE';
+      }
+    }
+    const badge = $(`cc-badge-${camId}`);
+    if (badge) {
+      badge.className = 's-badge s-badge-safe';
+      badge.textContent = 'SAFE';
+    }
+    if (loc) set(`loc-${camId}`, loc);
+  }
+
+  // 2. Cameras page card
+  const card = $(`pg-card-${camId}`);
+  if (card) {
+    card.classList.remove('cam-page-card--offline');
+    card.dataset.status = 'live';
+    const chip = $(`cpc-chip-${camId}`);
+    if (chip) {
+      chip.className = 'live-chip';
+      chip.innerHTML = '<span class="live-dot"></span>LIVE';
+    }
+    const badge = $(`cpc-badge-${camId}`);
+    if (badge) {
+      badge.className = 's-badge s-badge-safe';
+      badge.textContent = 'SAFE';
+    }
+    const thumb = $(`cpc-thumb-${camId}`);
+    if (thumb) {
+      thumb.className = 'cpc-thumb';
+      let img = thumb.querySelector('img');
+      if (!img) {
+        img = document.createElement('img');
+        img.className = 'cpc-img';
+        img.alt = camId;
+        thumb.prepend(img);
+      }
+      img.style.display = 'block';
+      img.src = `/video_feed/${camId}?t=${Date.now()}`;
+      const icon = thumb.querySelector('i'); if (icon) icon.style.display = 'none';
+      const p = thumb.querySelector('p'); if (p) p.style.display = 'none';
+      const span = thumb.querySelector('span'); if (span) span.style.display = 'none';
+    }
+    if (loc) set(`cpc-loc-${camId}`, loc);
+    set(`cpc-fps-${camId}`, '30 FPS');
+    set(`cpc-det-${camId}`, '0 detections');
+  }
+}
+
+function deactivateCameraUI(camId) {
+  // 1. Overview cell
+  const thumb = $(`thumb-${camId}`);
+  if (thumb) {
+    thumb.className = 'cc-thumb cc-offline';
+    const img = thumb.querySelector('img'); if (img) img.style.display = 'none';
+    const icon = thumb.querySelector('i'); if (icon) icon.style.display = 'inline-block';
+    const span = thumb.querySelector('span');
+    if (span) {
+      span.className = '';
+      span.textContent = 'No Signal';
+    }
+  }
+  const badge = $(`cc-badge-${camId}`);
+  if (badge) {
+    badge.className = 's-badge s-badge-off';
+    badge.textContent = 'OFFLINE';
+  }
+
+  // 2. Cameras page card
+  const card = $(`pg-card-${camId}`);
+  if (card) {
+    card.classList.add('cam-page-card--offline');
+    card.dataset.status = 'offline';
+    const chip = $(`cpc-chip-${camId}`);
+    if (chip) {
+      chip.className = 'offline-chip';
+      chip.textContent = 'OFFLINE';
+    }
+    const badge2 = $(`cpc-badge-${camId}`);
+    if (badge2) {
+      badge2.className = 's-badge s-badge-off';
+      badge2.textContent = 'INACTIVE';
+    }
+    const thumb2 = $(`cpc-thumb-${camId}`);
+    if (thumb2) {
+      thumb2.className = 'cpc-thumb cpc-thumb--offline';
+      const img = thumb2.querySelector('img'); if (img) img.style.display = 'none';
+      const icon = thumb2.querySelector('i'); if (icon) icon.style.display = 'inline-block';
+      const p = thumb2.querySelector('p'); if (p) p.style.display = 'block';
+      const span = thumb2.querySelector('span'); if (span) span.style.display = 'inline';
+    }
+    set(`cpc-fps-${camId}`, '— FPS');
+    set(`cpc-det-${camId}`, 'Stream unavailable');
+  }
+
+  // Revert main feed if viewing this camera
+  const feed = $('webcam-feed');
+  if (feed && feed.src.includes(camId)) {
+    selectMainCamera('CAM-01');
+  }
+}
+
 async function submitAddCamera(e) {
   e.preventDefault();
   const name = $('cam-name')?.value||'New Camera';
   const loc  = $('cam-location')?.value||'Unknown';
   const url  = $('cam-url')?.value||'0';
-  
-  // Find a free CAM id (CAM-02, CAM-03, CAM-04)
-  const idMap = { 'CAM-02': $('pg-card-CAM-02'), 'CAM-03': null, 'CAM-04': null };
-  let newId = 'CAM-02';
+  let slotPref = $('cam-slot')?.value||'auto';
+
+  let chosenId = slotPref;
+
+  if (slotPref === 'auto') {
+    try {
+      const cams = await fetch('/api/cameras').then(r => r.json());
+      const candidates = ['CAM-02', 'CAM-03', 'CAM-04'];
+      const freeCam = candidates.find(id => {
+        const found = cams.find(c => c.id === id);
+        return !found || !found.live;
+      });
+      chosenId = freeCam || 'CAM-02';
+    } catch(err) {
+      chosenId = 'CAM-02';
+    }
+  }
 
   try {
     const res = await fetch('/api/cameras/add', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ id: newId, name: name, location: loc, source: url })
+      body: JSON.stringify({ id: chosenId, name: name, location: loc, source: url })
     });
     const data = await res.json();
     if(data.success) {
-      showToast(`Camera "${name}" connected!`,'success');
+      showToast(`Camera "${name}" connected as ${chosenId}!`, 'success');
       closeAddCameraModal();
       $('add-cam-form')?.reset();
       
-      // Update DOM for CAM-02
-      if (newId === 'CAM-02') {
-        const card = $('pg-card-CAM-02');
-        if (card) {
-          card.classList.remove('cam-page-card--offline');
-          card.dataset.status = 'live';
-          const chip = $('cpc-chip-CAM-02'); if(chip) { chip.className = 'live-chip'; chip.innerHTML = '<span class="live-dot"></span>LIVE'; }
-          const badge = $('cpc-badge-CAM-02'); if(badge) { badge.className = 's-badge s-badge-safe'; badge.textContent = 'SAFE'; }
-          const thumb = $('cpc-thumb-CAM-02'); if(thumb) { thumb.className = 'cpc-thumb'; }
-          const img = thumb.querySelector('img'); if(img) { img.style.display = 'block'; img.src = `/video_feed/CAM-02?t=${Date.now()}`; }
-          const icon = thumb.querySelector('i'); if(icon) icon.style.display = 'none';
-          const p = thumb.querySelector('p'); if(p) p.style.display = 'none';
-          const span = thumb.querySelector('span'); if(span) span.style.display = 'none';
-          set('cpc-loc-CAM-02', loc);
-          set('loc-CAM-02', loc);
-          
-          // Also set it as the main active camera instantly
-          if (window.selectMainCamera) selectMainCamera('CAM-02');
-        }
-      }
+      // Update DOM for the chosen camera slot
+      activateCameraUI(chosenId, name, loc);
+
+      // Auto-switch main feed to newly added camera so user sees it right away
+      if (window.selectMainCamera) selectMainCamera(chosenId);
     } else {
       showToast(data.error || 'Failed to add camera', 'error');
     }
@@ -655,7 +838,29 @@ function openCamMenu(btn, camId) {
   $('ctx-view').onclick    = () => { openCamDetail(camId); closeContextMenu(); };
   $('ctx-config').onclick  = () => { openConfigModal(camId); closeContextMenu(); };
   $('ctx-snapshot').onclick= () => { captureSnapshot(); closeContextMenu(); };
-  $('ctx-disable').onclick = () => { showToast(`CAM-${camId.slice(-2)} disabled`,'warn'); closeContextMenu(); };
+  $('ctx-disable').onclick = async () => {
+    closeContextMenu();
+    if (camId === 'CAM-01') {
+      showToast('Cannot disconnect primary camera CAM-01', 'warn');
+      return;
+    }
+    try {
+      const r = await fetch('/api/cameras/stop', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ id: camId })
+      });
+      const res = await r.json();
+      if (res.success) {
+        showToast(`${camId} disconnected`, 'info');
+        deactivateCameraUI(camId);
+      } else {
+        showToast(res.error || `Failed to disconnect ${camId}`, 'error');
+      }
+    } catch(e) {
+      showToast(`Network error disconnecting ${camId}`, 'error');
+    }
+  };
 }
 function closeContextMenu() {
   $('context-menu')?.classList.remove('show');

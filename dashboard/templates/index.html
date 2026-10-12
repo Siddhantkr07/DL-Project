@@ -228,13 +228,13 @@
               </div>
               <div class="cam-cell" id="cc-CAM-03" tabindex="0" onclick="selectMainCamera('CAM-03')" ondblclick="openCamDetail('CAM-03')">
                 <div class="cc-hdr"><span class="cc-id">CAM-03</span><button class="icon-btn icon-xs" onclick="event.stopPropagation();openCamMenu(this,'CAM-03')"><i class="fa-solid fa-ellipsis"></i></button></div>
-                <div class="cc-thumb cc-offline"><i class="fa-solid fa-video-slash"></i><span>No Signal</span></div>
-                <div class="cc-foot"><span class="s-badge s-badge-off">OFFLINE</span><span class="cc-loc">Server Room</span></div>
+                <div class="cc-thumb cc-offline" id="thumb-CAM-03"><img src="/video_feed/CAM-03" class="cc-img" alt="CAM-03" style="display:none" onerror="this.style.display='none'"/><i class="fa-solid fa-video-slash"></i><span>No Signal</span></div>
+                <div class="cc-foot"><span class="s-badge s-badge-off" id="cc-badge-CAM-03">OFFLINE</span><span class="cc-loc" id="loc-CAM-03">Server Room</span></div>
               </div>
               <div class="cam-cell" id="cc-CAM-04" tabindex="0" onclick="selectMainCamera('CAM-04')" ondblclick="openCamDetail('CAM-04')">
                 <div class="cc-hdr"><span class="cc-id">CAM-04</span><button class="icon-btn icon-xs" onclick="event.stopPropagation();openCamMenu(this,'CAM-04')"><i class="fa-solid fa-ellipsis"></i></button></div>
-                <div class="cc-thumb cc-offline"><i class="fa-solid fa-video-slash"></i><span>No Signal</span></div>
-                <div class="cc-foot"><span class="s-badge s-badge-off">OFFLINE</span><span class="cc-loc">Parking Lot</span></div>
+                <div class="cc-thumb cc-offline" id="thumb-CAM-04"><img src="/video_feed/CAM-04" class="cc-img" alt="CAM-04" style="display:none" onerror="this.style.display='none'"/><i class="fa-solid fa-video-slash"></i><span>No Signal</span></div>
+                <div class="cc-foot"><span class="s-badge s-badge-off" id="cc-badge-CAM-04">OFFLINE</span><span class="cc-loc" id="loc-CAM-04">Parking Lot</span></div>
               </div>
             </div>
           </section>
@@ -250,7 +250,7 @@
                 <div class="empty-state" id="reid-empty" style="padding:14px;text-align:center;">
                   <i class="fa-solid fa-camera-rotate" style="font-size:22px;color:var(--tx-3);margin-bottom:6px;display:block;"></i>
                   <p style="font-size:13px;color:var(--tx-2);margin:0 0 4px 0;font-weight:500;">No cross-camera movements detected yet</p>
-                  <span style="font-size:11px;color:var(--tx-3);">When you move from CAM-01 to your phone camera (CAM-02), Sentinel AI will trace your movement live</span>
+                  <span style="font-size:11px;color:var(--tx-3);">When you move across cameras (CAM-01 ➔ Phone 1 / CAM-02 ➔ Phone 2 / CAM-03), Sentinel AI will trace your movement live</span>
                 </div>
               </div>
             </div>
@@ -346,41 +346,47 @@
               </div>
               <div class="cpc-footer">
                 <button class="btn btn-ghost btn-sm" onclick="openConfigModal('CAM-02')"><i class="fa-solid fa-sliders"></i> Configure</button>
-                <button class="btn btn-primary btn-sm" onclick="openAddCameraModal()"><i class="fa-solid fa-plug"></i> Connect</button>
+                <button class="btn btn-primary btn-sm" onclick="openAddCameraModal('CAM-02')"><i class="fa-solid fa-plug"></i> Connect</button>
               </div>
             </div>
             <!-- CAM-03 -->
-            <div class="cam-page-card cam-page-card--offline" data-status="offline">
+            <div class="cam-page-card cam-page-card--offline" data-status="offline" id="pg-card-CAM-03">
               <div class="cpc-header">
-                <div class="cpc-header-l"><span class="offline-chip">OFFLINE</span><span class="cpc-id">CAM-03</span></div>
-                <div class="cpc-header-r"><span class="s-badge s-badge-off">INACTIVE</span><button class="icon-btn icon-sm" onclick="openCamMenu(this,'CAM-03')"><i class="fa-solid fa-ellipsis"></i></button></div>
+                <div class="cpc-header-l"><span class="offline-chip" id="cpc-chip-CAM-03">OFFLINE</span><span class="cpc-id">CAM-03</span></div>
+                <div class="cpc-header-r"><span class="s-badge s-badge-off" id="cpc-badge-CAM-03">INACTIVE</span><button class="icon-btn icon-sm" onclick="openCamMenu(this,'CAM-03')"><i class="fa-solid fa-ellipsis"></i></button></div>
               </div>
-              <div class="cpc-thumb cpc-thumb--offline"><i class="fa-solid fa-video-slash"></i><p>No Signal</p><span>Camera not connected</span></div>
+              <div class="cpc-thumb cpc-thumb--offline" id="cpc-thumb-CAM-03">
+                <img src="/video_feed/CAM-03" class="cpc-img" alt="CAM-03" style="display:none" onerror="this.style.display='none'"/>
+                <i class="fa-solid fa-video-slash"></i><p>No Signal</p><span>Camera not connected</span>
+              </div>
               <div class="cpc-meta">
-                <div class="cpc-row"><i class="fa-solid fa-location-dot"></i><span>Server Room</span></div>
-                <div class="cpc-row"><i class="fa-solid fa-gauge-high"></i><span>— FPS</span></div>
-                <div class="cpc-row muted-row"><i class="fa-solid fa-circle-xmark"></i><span>Stream unavailable</span></div>
+                <div class="cpc-row"><i class="fa-solid fa-location-dot"></i><span id="cpc-loc-CAM-03">Server Room</span></div>
+                <div class="cpc-row"><i class="fa-solid fa-gauge-high"></i><span id="cpc-fps-CAM-03">— FPS</span></div>
+                <div class="cpc-row muted-row"><i class="fa-solid fa-circle-xmark"></i><span id="cpc-det-CAM-03">Stream unavailable</span></div>
               </div>
               <div class="cpc-footer">
                 <button class="btn btn-ghost btn-sm" onclick="openConfigModal('CAM-03')"><i class="fa-solid fa-sliders"></i> Configure</button>
-                <button class="btn btn-primary btn-sm" onclick="showToast('Connecting to CAM-03…','info')"><i class="fa-solid fa-plug"></i> Connect</button>
+                <button class="btn btn-primary btn-sm" onclick="openAddCameraModal('CAM-03')"><i class="fa-solid fa-plug"></i> Connect</button>
               </div>
             </div>
             <!-- CAM-04 -->
-            <div class="cam-page-card cam-page-card--offline" data-status="offline">
+            <div class="cam-page-card cam-page-card--offline" data-status="offline" id="pg-card-CAM-04">
               <div class="cpc-header">
-                <div class="cpc-header-l"><span class="offline-chip">OFFLINE</span><span class="cpc-id">CAM-04</span></div>
-                <div class="cpc-header-r"><span class="s-badge s-badge-off">INACTIVE</span><button class="icon-btn icon-sm" onclick="openCamMenu(this,'CAM-04')"><i class="fa-solid fa-ellipsis"></i></button></div>
+                <div class="cpc-header-l"><span class="offline-chip" id="cpc-chip-CAM-04">OFFLINE</span><span class="cpc-id">CAM-04</span></div>
+                <div class="cpc-header-r"><span class="s-badge s-badge-off" id="cpc-badge-CAM-04">INACTIVE</span><button class="icon-btn icon-sm" onclick="openCamMenu(this,'CAM-04')"><i class="fa-solid fa-ellipsis"></i></button></div>
               </div>
-              <div class="cpc-thumb cpc-thumb--offline"><i class="fa-solid fa-video-slash"></i><p>No Signal</p><span>Camera not connected</span></div>
+              <div class="cpc-thumb cpc-thumb--offline" id="cpc-thumb-CAM-04">
+                <img src="/video_feed/CAM-04" class="cpc-img" alt="CAM-04" style="display:none" onerror="this.style.display='none'"/>
+                <i class="fa-solid fa-video-slash"></i><p>No Signal</p><span>Camera not connected</span>
+              </div>
               <div class="cpc-meta">
-                <div class="cpc-row"><i class="fa-solid fa-location-dot"></i><span>Parking Lot</span></div>
-                <div class="cpc-row"><i class="fa-solid fa-gauge-high"></i><span>— FPS</span></div>
-                <div class="cpc-row muted-row"><i class="fa-solid fa-circle-xmark"></i><span>Stream unavailable</span></div>
+                <div class="cpc-row"><i class="fa-solid fa-location-dot"></i><span id="cpc-loc-CAM-04">Parking Lot</span></div>
+                <div class="cpc-row"><i class="fa-solid fa-gauge-high"></i><span id="cpc-fps-CAM-04">— FPS</span></div>
+                <div class="cpc-row muted-row"><i class="fa-solid fa-circle-xmark"></i><span id="cpc-det-CAM-04">Stream unavailable</span></div>
               </div>
               <div class="cpc-footer">
                 <button class="btn btn-ghost btn-sm" onclick="openConfigModal('CAM-04')"><i class="fa-solid fa-sliders"></i> Configure</button>
-                <button class="btn btn-primary btn-sm" onclick="showToast('Connecting to CAM-04…','info')"><i class="fa-solid fa-plug"></i> Connect</button>
+                <button class="btn btn-primary btn-sm" onclick="openAddCameraModal('CAM-04')"><i class="fa-solid fa-plug"></i> Connect</button>
               </div>
             </div>
           </div>
@@ -624,18 +630,27 @@
       <button class="modal-close" onclick="closeAddCameraModal()"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <form id="add-cam-form" onsubmit="submitAddCamera(event)">
-      <div class="form-group"><label class="form-label">Camera Name *</label><input class="form-input" id="cam-name" placeholder="e.g. Main Entrance" required/></div>
-      <div class="form-group"><label class="form-label">Location</label><input class="form-input" id="cam-location" placeholder="e.g. Building A – Floor 2"/></div>
+      <div class="form-group">
+        <label class="form-label"><i class="fa-solid fa-list-check" style="margin-right:5px;color:var(--brand)"></i>Camera Slot *</label>
+        <select class="form-input" id="cam-slot">
+          <option value="auto">⚡ Auto-Assign Next Available (CAM-02 / CAM-03 / CAM-04)</option>
+          <option value="CAM-02">CAM-02 (North Corridor / Phone 1)</option>
+          <option value="CAM-03">CAM-03 (Server Room / Phone 2)</option>
+          <option value="CAM-04">CAM-04 (Parking Lot / Phone 3)</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Camera Name *</label><input class="form-input" id="cam-name" placeholder="e.g. Phone 2 / Main Entrance" required/></div>
+      <div class="form-group"><label class="form-label">Location</label><input class="form-input" id="cam-location" placeholder="e.g. Building A – Floor 2 / Hallway"/></div>
       <div class="form-group">
         <label class="form-label">Stream Source *</label>
         <select class="form-input" id="cam-type" onchange="updateStreamLabel()">
+          <option value="ip">IP Camera (HTTP / Phone App)</option>
           <option value="webcam">Built-in Webcam (index)</option>
-          <option value="ip">IP Camera (HTTP)</option>
           <option value="rtsp">RTSP Stream</option>
           <option value="file">Video File</option>
         </select>
       </div>
-      <div class="form-group"><label class="form-label" id="stream-url-label">Webcam Index</label><input class="form-input" id="cam-url" placeholder="0" required/></div>
+      <div class="form-group"><label class="form-label" id="stream-url-label">Camera URL (http://…)</label><input class="form-input" id="cam-url" placeholder="http://192.168.1.100:8080/video" required/></div>
       <div class="form-group form-group--inline">
         <label class="form-label">Enable AI Detection</label>
         <button type="button" class="toggle-btn toggle-on" id="cam-detect-toggle" onclick="this.classList.toggle('toggle-on')"></button>
