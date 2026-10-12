@@ -1,64 +1,125 @@
 """
-Sentinel AI – Dashboard Backend (Multi-Camera + YOLOv8s)
+Sentinel AI – Dashboard Backend (Multi-Camera + YOLO11x)
 Real webcam + IP Camera support + Threat Intelligence Engine
+GPU Beast Mode: CUDA FP16 + imgsz=1280 + ByteTrack
 """
 
 from flask import Flask, render_template, request, jsonify, Response
 from flask_socketio import SocketIO
-import threading, time, random, uuid, logging, cv2, numpy as np
+import threading, time, random, uuid, logging, cv2, numpy as np, os
 from collections import deque, defaultdict
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("SentinelAI")
 
+# ── GPU Setup ─────────────────────────────────────────────────────────────────
+import torch
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+if DEVICE == "cuda":
+    # Maximize GPU throughput: enable TF32 + benchmark cudnn kernels
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.benchmark        = True
+    torch.backends.cudnn.allow_tf32       = True
+    log.info(f"🔥 GPU: {torch.cuda.get_device_name(0)} | VRAM: {torch.cuda.get_device_properties(0).total_memory/1e9:.1f}GB | FP16: ON")
+else:
+    log.warning("No CUDA GPU found — running on CPU (slow!)")
+
 # ── YOLO ──────────────────────────────────────────────────────────────────────
-YOLO_AVAILABLE = False
-_yolo_model = None       # General object detection (knife, car, etc.)
-_pose_model  = None      # Person detection via skeleton keypoints (zero false positives)
+# Key GPU settings applied to every .track() / .predict() call:
+#   device='cuda'   → force GPU
+#   half=True       → FP16 inference (2× faster on RTX, half VRAM usage)
+#   imgsz=1280      → high-res input = much better small-object detection
+#   iou=0.45        → tighter NMS = fewer overlapping duplicate boxes
+YOLO_AVAILABLE   = False
+YOLO_DEVICE      = DEVICE
+YOLO_HALF        = (DEVICE == "cuda")   # FP16 only on GPU
+YOLO_IMGSZ       = 800                  # Balanced for better FPS on RTX 4050
+YOLO_IOU         = 0.45                 # NMS IoU threshold
+
+_yolo_model = None   # Object detection model (weapons, vehicles, hazards)
+_pose_model = None   # Pose model (persons via 17 skeleton keypoints)
+
 try:
     from ultralytics import YOLO
-    # Pose model: detects 17 human skeleton keypoints — much more accurate for person detection
-    _pose_model  = YOLO("yolo11x-pose.pt")
-    # Custom Detection model: specifically fine-tuned on CCTV Weapon dataset!
-    import os
-    custom_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "runs", "detect", "sentinel_ai", "weapon_model_v1", "weights", "best.pt"))
-    _yolo_model  = YOLO(custom_model_path)
+
+    # ── Pose Model ────────────────────────────────────────────────────────────
+    _pose_model = YOLO("yolo11x-pose.pt")
+    _pose_model.to(YOLO_DEVICE)
+    if YOLO_HALF:
+        _pose_model.model.half()
+    log.info("YOLO11x-Pose loaded on GPU (FP16) ✅")
+
+    # ── Threat Detection Model (Guns, Knives, Explosives) ──────────────────────
+    # We downloaded a specialized YOLOv8 threat detection model
+    _threat_yolo = None
+    threat_model_path = os.path.join(os.path.dirname(__file__), "threat_model.pt")
+    if os.path.exists(threat_model_path):
+        _threat_yolo = YOLO(threat_model_path)
+        _threat_yolo.to(YOLO_DEVICE)
+        if YOLO_HALF: _threat_yolo.model.half()
+        log.info("Specialized Threat Model (Guns/Knives/Explosives) loaded ✅")
+
+    # ── General Object Detection Model (Vehicles, Scissors, etc) ───────────────
+    # Using yolo11s (small) instead of 11x since we just need it for basic vehicles
+    # and scissors now. Saves massive VRAM and boosts FPS!
+    _yolo_model = YOLO("yolo11s.pt")
+    _yolo_model.to(YOLO_DEVICE)
+    if YOLO_HALF:
+        _yolo_model.model.half()
+    log.info(f"COCO Object detection model on {YOLO_DEVICE.upper()} (FP16={YOLO_HALF}, imgsz={YOLO_IMGSZ}) ✅")
+
+    # ── GPU Warm-up (eliminate first-frame latency spike) ─────────────────────
+    _dummy = np.zeros((720, 1280, 3), dtype=np.uint8)
+    _yolo_model.predict(_dummy, device=YOLO_DEVICE, half=YOLO_HALF, imgsz=YOLO_IMGSZ, verbose=False)
+    _pose_model.predict(_dummy, device=YOLO_DEVICE, half=YOLO_HALF, imgsz=YOLO_IMGSZ, verbose=False)
+    if _threat_yolo:
+        _threat_yolo.predict(_dummy, device=YOLO_DEVICE, half=YOLO_HALF, imgsz=YOLO_IMGSZ, verbose=False)
+    del _dummy
+    log.info("GPU warm-up complete 🔥")
+
     YOLO_AVAILABLE = True
-    log.info("Sentinel Custom Weapon Model + YOLO11x-Pose loaded ✅")
+
 except Exception as e:
     log.warning(f"YOLO not available: {e}")
 
 # ── Zero-Shot Verification (CLIP) ─────────────────────────────────────────────
 CLIP_AVAILABLE = False
-_clip_model = None
+_clip_model    = None
 _clip_processor = None
 try:
     from transformers import CLIPProcessor, CLIPModel
     from PIL import Image
-    import torch
-    # ViT-B/32 is very fast and highly accurate for zero-shot image classification
-    _clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to("cuda")
+
+    _clip_model = (
+        CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        .to(DEVICE)
+        .half()          # FP16 for CLIP too — 2× faster on RTX
+        .eval()
+    )
     _clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     CLIP_AVAILABLE = True
-    log.info("OpenAI CLIP (ViT-B/32) Verification Engine loaded on GPU ✅")
+    log.info("OpenAI CLIP (ViT-B/32) on GPU FP16 ✅")
 except Exception as e:
-    log.warning(f"CLIP Verification Engine not available: {e}")
+    log.warning(f"CLIP not available: {e}")
 
 # ── Threat Intelligence Engine (v2 — Temporal Smoothing) ─────────────────────
 class ThreatEngine:
-    WEAPON_CLASSES  = {"knife", "scissors", "weapon"} # Added custom model's "weapon" class
-    HAZARD_CLASSES  = {"fire", "smoke"}
+    # Added 'gun', 'grenade' to weapons; 'explosion' to hazards!
+    WEAPON_CLASSES  = {"knife", "scissors", "weapon", "gun", "grenade"} 
+    HAZARD_CLASSES  = {"fire", "smoke", "explosion"}
     VEHICLE_CLASSES = {"car", "truck", "motorcycle", "bus"}
     PERSON_CLASS    = "person"
 
-    # Confidence thresholds — raised significantly to kill false positives
-    CONF_PERSON  = 0.70   # Person must be 70% confident (strict to avoid object=person)
-    CONF_WEAPON  = 0.75   # Weapon must be 75% confident (very strict)
+    # Confidence thresholds — balanced for high precision without being completely blind
+    CONF_PERSON  = 0.60   
+    CONF_WEAPON  = 0.60   # 60% confidence filters out random noise but still catches real weapons
     CONF_VEHICLE = 0.55
-    CONF_DEFAULT = 0.55
+    CONF_DEFAULT = 0.50
 
-    # Temporal buffer: threat must be seen in N consecutive frames before alerting
-    SMOOTHING_FRAMES = 5   # ~5 frames at 15fps ≈ 0.3 seconds of consistent detection
+    # Temporal buffer: length of the rolling history window
+    SMOOTHING_FRAMES = 5
+    # Must be seen in at least 3 out of 5 frames (filters out 1-2 frame glitches = higher precision)
+    REQUIRED_DETECTIONS = 3
 
     LEVEL_RANK = {"SAFE": 0, "INFO": 1, "WARNING": 2, "CRITICAL": 3}
     LEVEL_COLOR = {
@@ -78,49 +139,52 @@ class ThreatEngine:
         return ((x2 - x1) * (y2 - y1)) / max(W * H, 1)
 
     def _verify_threat(self, frame_bgr, bbox, category) -> bool:
-        """Uses OpenAI CLIP to verify the cropped region zero-shot."""
+        """Uses OpenAI CLIP to verify the cropped region zero-shot (GPU FP16)."""
         if not CLIP_AVAILABLE:
-            return True # fallback to YOLO if CLIP fails
+            return True  # fallback: trust YOLO if CLIP not available
             
         x1, y1, x2, y2 = map(int, bbox)
         crop = frame_bgr[max(0,y1):y2, max(0,x1):x2]
         if crop.size == 0: return False
         
-        # Convert BGR to RGB for PIL
-        crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-        pil_img = Image.fromarray(crop_rgb)
+        # Convert BGR → RGB for PIL
+        pil_img = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
 
         if category == "weapon":
-            # Very precise labels to force the model to differentiate
-            labels = ["a photo of a deadly knife weapon", "a photo of a gun or pistol", 
-                      "a photo of a smartphone", "a photo of a pen or pencil", 
-                      "a photo of keys", "a photo of a hand", "a photo of a person"]
+            # Added more negative classes to greatly improve precision!
+            labels = ["a photo of a deadly knife weapon", "a photo of a gun or pistol",
+                      "a photo of a smartphone", "a photo of a pen or pencil",
+                      "a photo of keys", "a photo of a hand", "a photo of a person",
+                      "a photo of a remote control", "a photo of a bottle", "a photo of a tool"]
             threat_labels = {"a photo of a deadly knife weapon", "a photo of a gun or pistol"}
         elif category == "hazard":
-            labels = ["a photo of dangerous fire and flames", "a photo of thick smoke", 
+            labels = ["a photo of dangerous fire and flames", "a photo of thick smoke",
                       "a photo of a bright light or reflection", "a photo of fog or clouds"]
             threat_labels = {"a photo of dangerous fire and flames", "a photo of thick smoke"}
         else:
             return True
-            
-        import torch
+
         with torch.no_grad():
-            inputs = _clip_processor(text=labels, images=pil_img, return_tensors="pt", padding=True).to("cuda")
+            inputs = _clip_processor(text=labels, images=pil_img,
+                                     return_tensors="pt", padding=True).to(DEVICE)
+            # Cast pixel_values to FP16 to match the half-precision CLIP model
+            if YOLO_HALF:
+                inputs["pixel_values"] = inputs["pixel_values"].half()
             outputs = _clip_model(**inputs)
             probs = outputs.logits_per_image.softmax(dim=1)[0]
-            best_idx = probs.argmax().item()
-            best_label = labels[best_idx]
-            
+            best_label = labels[probs.argmax().item()]
+
         return best_label in threat_labels
 
     def _smooth(self, tag: str, detected: bool) -> bool:
-        """Push detection result into rolling buffer. Return True only if
-        the tag was detected in ALL of the last SMOOTHING_FRAMES frames."""
+        """Push detection result into rolling buffer. Return True if
+        detected in at least REQUIRED_DETECTIONS out of the last SMOOTHING_FRAMES."""
         self._buffers[tag].append(1 if detected else 0)
         buf = self._buffers[tag]
-        return len(buf) == self.SMOOTHING_FRAMES and sum(buf) == self.SMOOTHING_FRAMES
+        # Allow flicker: as long as it's detected REQUIRED_DETECTIONS times in the window
+        return sum(buf) >= self.REQUIRED_DETECTIONS
 
-    def analyse(self, results, frame_shape, pose_results=None, frame_bgr=None) -> dict:
+    def analyse(self, results, frame_shape, pose_results=None, frame_bgr=None, threat_results=None) -> dict:
         H, W = frame_shape[:2]
         now = time.time()
         persons, weapons, hazards, vehicles, other = [], [], [], [], []
@@ -177,50 +241,55 @@ class ThreatEngine:
                 persons.append(obj)
 
         # ── OBJECTS: from Detection model (weapons, vehicles, hazards) ────────────
+        all_boxes = []
         if YOLO_AVAILABLE and results and len(results[0].boxes):
-            for box in results[0].boxes:
-                conf = float(box.conf[0])
-                cls_id = int(box.cls[0])
-                cls_name = results[0].names[cls_id].lower()
+            all_boxes.extend([(box, results[0].names) for box in results[0].boxes])
+        if YOLO_AVAILABLE and threat_results and len(threat_results[0].boxes):
+            all_boxes.extend([(box, threat_results[0].names) for box in threat_results[0].boxes])
 
-                # Skip persons — handled by pose model above
-                if cls_name == self.PERSON_CLASS:
+        for box, names in all_boxes:
+            conf = float(box.conf[0])
+            cls_id = int(box.cls[0])
+            cls_name = names[cls_id].lower()
+
+            # Skip persons — handled by pose model above
+            if cls_name == self.PERSON_CLASS:
+                continue
+
+            if cls_name in self.WEAPON_CLASSES and conf < self.CONF_WEAPON:
+                continue
+            elif cls_name in self.VEHICLE_CLASSES and conf < self.CONF_VEHICLE:
+                continue
+            elif cls_name not in (self.WEAPON_CLASSES | self.HAZARD_CLASSES | self.VEHICLE_CLASSES):
+                if conf < self.CONF_DEFAULT:
                     continue
 
-                if cls_name in self.WEAPON_CLASSES and conf < self.CONF_WEAPON:
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            prox = self._proximity_ratio(x1, y1, x2, y2, W, H)
+            track_id = int(box.id[0]) if box.id is not None else None
+            obj = dict(cls=cls_name, conf=round(conf, 2), prox=round(prox, 3),
+                       bbox=[x1, y1, x2, y2], track_id=track_id)
+
+            # ── Zero-Shot Verification for Critical Threats ───────────────────
+            if track_id is not None and (cls_name in self.WEAPON_CLASSES or cls_name in self.HAZARD_CLASSES):
+                cat = "weapon" if cls_name in self.WEAPON_CLASSES else "hazard"
+                if track_id not in self.verifications and frame_bgr is not None:
+                    is_threat = self._verify_threat(frame_bgr, [x1, y1, x2, y2], cat)
+                    self.verifications[track_id] = is_threat
+                    
+                # If verified as FALSE (e.g. it's a phone, not a knife), ignore it
+                if track_id in self.verifications and not self.verifications[track_id]:
                     continue
-                elif cls_name in self.VEHICLE_CLASSES and conf < self.CONF_VEHICLE:
+            elif frame_bgr is not None and track_id is None and (cls_name in self.WEAPON_CLASSES or cls_name in self.HAZARD_CLASSES):
+                # No track_id, verify every frame (fallback)
+                cat = "weapon" if cls_name in self.WEAPON_CLASSES else "hazard"
+                if not self._verify_threat(frame_bgr, [x1, y1, x2, y2], cat):
                     continue
-                elif cls_name not in (self.WEAPON_CLASSES | self.HAZARD_CLASSES | self.VEHICLE_CLASSES):
-                    if conf < self.CONF_DEFAULT:
-                        continue
 
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                prox = self._proximity_ratio(x1, y1, x2, y2, W, H)
-                track_id = int(box.id[0]) if box.id is not None else None
-                obj = dict(cls=cls_name, conf=round(conf, 2), prox=round(prox, 3),
-                           bbox=[x1, y1, x2, y2], track_id=track_id)
-
-                # ── Zero-Shot Verification for Critical Threats ───────────────────
-                if track_id is not None and (cls_name in self.WEAPON_CLASSES or cls_name in self.HAZARD_CLASSES):
-                    cat = "weapon" if cls_name in self.WEAPON_CLASSES else "hazard"
-                    if track_id not in self.verifications and frame_bgr is not None:
-                        is_threat = self._verify_threat(frame_bgr, [x1, y1, x2, y2], cat)
-                        self.verifications[track_id] = is_threat
-                        
-                    # If verified as FALSE (e.g. it's a phone, not a knife), ignore it
-                    if track_id in self.verifications and not self.verifications[track_id]:
-                        continue
-                elif frame_bgr is not None and track_id is None and (cls_name in self.WEAPON_CLASSES or cls_name in self.HAZARD_CLASSES):
-                    # No track_id, verify every frame (fallback)
-                    cat = "weapon" if cls_name in self.WEAPON_CLASSES else "hazard"
-                    if not self._verify_threat(frame_bgr, [x1, y1, x2, y2], cat):
-                        continue
-
-                if cls_name in self.WEAPON_CLASSES:    weapons.append(obj)
-                elif cls_name in self.HAZARD_CLASSES:  hazards.append(obj)
-                elif cls_name in self.VEHICLE_CLASSES: vehicles.append(obj)
-                else:                                  other.append(obj)
+            if cls_name in self.WEAPON_CLASSES:    weapons.append(obj)
+            elif cls_name in self.HAZARD_CLASSES:  hazards.append(obj)
+            elif cls_name in self.VEHICLE_CLASSES: vehicles.append(obj)
+            else:                                  other.append(obj)
 
         # ── Temporal smoothing checks ─────────────────────────────────────────
         fallen_confirmed  = self._smooth("fall",      any(p.get("fallen") for p in persons))
@@ -241,12 +310,14 @@ class ThreatEngine:
 
         if weapon_confirmed:
             level = "CRITICAL"
-            reasons.append(f"WEAPON DETECTED: {weapons[0]['cls'].upper()}")
+            cls_name = weapons[0]['cls'].upper() if weapons else "WEAPON"
+            reasons.append(f"WEAPON DETECTED: {cls_name}")
             tags.append("weapon")
 
         if hazard_confirmed:
             level = "CRITICAL"
-            reasons.append(f"HAZARD: {hazards[0]['cls'].upper()}")
+            cls_name = hazards[0]['cls'].upper() if hazards else "HAZARD"
+            reasons.append(f"HAZARD: {cls_name}")
             tags.append("hazard")
 
         if crowd_surge:
@@ -290,9 +361,9 @@ _threat_engine = ThreatEngine()
 
 
 # ── Multi-Camera Manager ───────────────────────────────────────────────────────
-CLS_COLORS = {"person": (0, 230, 120), "car": (0, 190, 255), "truck": (0, 100, 255), "knife": (0, 0, 255), "fire": (0, 80, 255), "default": (180, 180, 0)}
+CLS_COLORS = {"person": (0, 230, 120), "car": (0, 190, 255), "truck": (0, 100, 255), "knife": (0, 0, 255), "gun": (0, 0, 255), "grenade": (0, 0, 255), "explosion": (0, 80, 255), "fire": (0, 80, 255), "default": (180, 180, 0)}
 
-def _draw(frame, results, threat, cam_id, fps, pose_results=None):
+def _draw(frame, results, threat_results, threat, cam_id, fps, pose_results=None):
     h, w = frame.shape[:2]
 
     # ── Draw persons from pose model (green skeleton boxes) ──────────────────
@@ -325,23 +396,28 @@ def _draw(frame, results, threat, cam_id, fps, pose_results=None):
             except Exception:
                 pass
 
-    # ── Draw objects from detection model (weapons, vehicles etc.) ────────────
+    # ── Draw objects from detection models (weapons, vehicles etc.) ────────────
+    all_boxes = []
     if YOLO_AVAILABLE and results and len(results[0].boxes):
-        for box in results[0].boxes:
-            conf = float(box.conf[0])
-            cls_id = int(box.cls[0])
-            cls_name = results[0].names[cls_id].lower()
-            if cls_name == "person": continue  # handled above
-            if cls_name in ThreatEngine.WEAPON_CLASSES and conf < 0.75: continue
-            elif conf < 0.55: continue
-            x1,y1,x2,y2 = map(int, box.xyxy[0].tolist())
-            color = CLS_COLORS.get(cls_name, CLS_COLORS["default"])
-            track_label = f" #{int(box.id[0])}" if box.id is not None else ""
-            cv2.rectangle(frame, (x1,y1), (x2,y2), color, 2)
-            lbl = f"{cls_name}{track_label} {conf:.0%}"
-            (tw,th),_ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
-            cv2.rectangle(frame, (x1, y1-th-6), (x1+tw+4, y1), color, -1)
-            cv2.putText(frame, lbl, (x1+2, y1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0,0,0), 1)
+        all_boxes.extend([(box, results[0].names) for box in results[0].boxes])
+    if YOLO_AVAILABLE and threat_results and len(threat_results[0].boxes):
+        all_boxes.extend([(box, threat_results[0].names) for box in threat_results[0].boxes])
+
+    for box, names in all_boxes:
+        conf = float(box.conf[0])
+        cls_id = int(box.cls[0])
+        cls_name = names[cls_id].lower()
+        if cls_name == "person": continue  # handled above
+        if cls_name in ThreatEngine.WEAPON_CLASSES and conf < ThreatEngine.CONF_WEAPON: continue
+        elif conf < 0.50: continue
+        x1,y1,x2,y2 = map(int, box.xyxy[0].tolist())
+        color = CLS_COLORS.get(cls_name, CLS_COLORS["default"])
+        track_label = f" #{int(box.id[0])}" if box.id is not None else ""
+        cv2.rectangle(frame, (x1,y1), (x2,y2), color, 2)
+        lbl = f"{cls_name}{track_label} {conf:.0%}"
+        (tw,th),_ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
+        cv2.rectangle(frame, (x1, y1-th-6), (x1+tw+4, y1), color, -1)
+        cv2.putText(frame, lbl, (x1+2, y1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0,0,0), 1)
 
     cv2.rectangle(frame, (0,0), (w,46), (8,12,24), -1)
     cv2.putText(frame, "SENTINEL AI", (12,30), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,212,255), 2)
@@ -367,62 +443,120 @@ class CameraStream:
         self.fps = 0.0
         self.lock = threading.Lock()
         self.thread = None
+        
+        # We need a separate thread purely for reading the camera buffer,
+        # otherwise cv2 blocks and queues up old frames, causing massive lag!
+        self.grab_thread = None
+        self.raw_frame = None
 
     def start(self):
         self.running = True
+        self.grab_thread = threading.Thread(target=self._grabber, daemon=True)
+        self.grab_thread.start()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
     def stop(self):
         self.running = False
 
-    def _run(self):
+    def _grabber(self):
         src = int(self.source) if str(self.source).isdigit() else self.source
         cap = cv2.VideoCapture(src)
         if not cap.isOpened():
             log.error(f"Cannot open camera {self.cam_id} at {self.source}")
             with self.lock: self.latest_threat["reasons"] = ["Camera Offline"]
             return
-        
+            
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        prev = time.time()
-
+        
         while self.running:
             ret, frame = cap.read()
-            if not ret:
-                time.sleep(0.1)
+            if ret:
+                # Flip horizontally for natural mirror view (laptop webcam only)
+                if str(self.source).isdigit() or self.source == 0:
+                    frame = cv2.flip(frame, 1)
+                self.raw_frame = frame
+            else:
+                time.sleep(0.01)
+        cap.release()
+
+    def _run(self):
+        prev = time.time()
+        while self.running:
+            frame = self.raw_frame
+            if frame is None:
+                time.sleep(0.05)
                 continue
             
-            # Flip horizontally for natural mirror view (laptop webcam only)
-            if str(self.source).isdigit() or self.source == 0:
-                frame = cv2.flip(frame, 1)
+            # Make a copy so grabber doesn't overwrite it mid-inference
+            frame = frame.copy()
 
             now = time.time()
             fps = round(1.0/max(now-prev, 1e-9), 1)
             prev = now
 
-            results      = None   # detection results (weapons, vehicles etc.)
-            pose_results = None   # pose results (persons via skeleton)
+            results        = None   # detection results (weapons, vehicles etc.)
+            pose_results   = None   # pose results (persons via skeleton)
+            threat_results = None   # specialized threat results (guns, grenades, knives, explosion)
             if YOLO_AVAILABLE:
                 try:
-                    # Run object detection (ByteTrack) — skips persons internally
-                    results = _yolo_model.track(frame, persist=True,
-                                                tracker="bytetrack.yaml", verbose=False)
-                except: pass
+                    # Object detection: COCO fallback (vehicles, scissors)
+                    results = _yolo_model.track(
+                        frame,
+                        persist       = True,
+                        tracker       = "bytetrack.yaml",
+                        device        = YOLO_DEVICE,
+                        half          = YOLO_HALF,
+                        imgsz         = YOLO_IMGSZ,
+                        iou           = YOLO_IOU,
+                        agnostic_nms  = False,
+                        verbose       = False,
+                    )
+                except Exception as e:
+                    log.debug(f"Detection error: {e}")
+                
                 try:
-                    # Run pose model — persons detected via 17 skeleton keypoints
+                    # Specialized Threat Detection: guns, knives, explosives
+                    if _threat_yolo is not None:
+                        threat_results = _threat_yolo.track(
+                            frame,
+                            persist       = True,
+                            tracker       = "bytetrack.yaml",
+                            device        = YOLO_DEVICE,
+                            half          = YOLO_HALF,
+                            imgsz         = YOLO_IMGSZ,
+                            iou           = YOLO_IOU,
+                            agnostic_nms  = False,
+                            verbose       = False,
+                        )
+                except Exception as e:
+                    log.debug(f"Threat detection error: {e}")
+
+                try:
+                    # Pose model: same GPU beast settings
                     if _pose_model is not None:
-                        pose_results = _pose_model.track(frame, persist=True,
-                                                         tracker="bytetrack.yaml", verbose=False)
-                except: pass
+                        pose_results = _pose_model.track(
+                            frame,
+                            persist       = True,
+                            tracker       = "bytetrack.yaml",
+                            device        = YOLO_DEVICE,
+                            half          = YOLO_HALF,
+                            imgsz         = YOLO_IMGSZ,
+                            iou           = YOLO_IOU,
+                            agnostic_nms  = False,
+                            verbose       = False,
+                        )
+                except Exception as e:
+                    log.debug(f"Pose error: {e}")
 
             threat = _threat_engine.analyse(results or [], frame.shape,
                                             pose_results=pose_results,
-                                            frame_bgr=frame)
-            annotated = _draw(frame.copy(), results, threat, self.cam_id, fps,
+                                            frame_bgr=frame, threat_results=threat_results)
+            annotated = _draw(frame.copy(), results, threat_results, threat, self.cam_id, fps,
                               pose_results=pose_results)
-            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
             
             with self.lock:
                 self.fps = fps

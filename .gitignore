@@ -14,6 +14,7 @@ env/
 *.pth
 *.h5
 *.onnx
+*.engine
 
 # Datasets
 data/raw/
